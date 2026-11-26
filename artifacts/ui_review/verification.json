@@ -1,0 +1,1199 @@
+{
+  "metrics": {
+    "left_ratio": 0.65,
+    "window_default_w": 1360,
+    "window_min_w": 1000,
+    "right_min_w": 360
+  },
+  "sizes": [
+    {
+      "size": [
+        1024,
+        768
+      ],
+      "min_size": [
+        1000,
+        720
+      ],
+      "splitter": {
+        "sizes": [
+          638,
+          360
+        ],
+        "left_ratio": 0.639,
+        "ratio_ok": true
+      },
+      "cells": {
+        "count": 16,
+        "max_ratio": 1.0,
+        "all_under_1_3": true
+      },
+      "overlaps": {
+        "count": 0,
+        "all_zero": true
+      },
+      "dock_default_hidden": true
+    },
+    {
+      "size": [
+        1280,
+        800
+      ],
+      "min_size": [
+        1000,
+        720
+      ],
+      "splitter": {
+        "sizes": [
+          815,
+          439
+        ],
+        "left_ratio": 0.65,
+        "ratio_ok": true
+      },
+      "cells": {
+        "count": 16,
+        "max_ratio": 1.0,
+        "all_under_1_3": true
+      },
+      "overlaps": {
+        "count": 0,
+        "all_zero": true
+      },
+      "dock_default_hidden": true
+    },
+    {
+      "size": [
+        1360,
+        840
+      ],
+      "min_size": [
+        1000,
+        720
+      ],
+      "splitter": {
+        "sizes": [
+          867,
+          467
+        ],
+        "left_ratio": 0.65,
+        "ratio_ok": true
+      },
+      "cells": {
+        "count": 16,
+        "max_ratio": 1.0,
+        "all_under_1_3": true
+      },
+      "overlaps": {
+        "count": 0,
+        "all_zero": true
+      },
+      "dock_default_hidden": true
+    },
+    {
+      "size": [
+        1440,
+        900
+      ],
+      "min_size": [
+        1000,
+        720
+      ],
+      "splitter": {
+        "sizes": [
+          919,
+          495
+        ],
+        "left_ratio": 0.65,
+        "ratio_ok": true
+      },
+      "cells": {
+        "count": 16,
+        "max_ratio": 1.0,
+        "all_under_1_3": true
+      },
+      "overlaps": {
+        "count": 0,
+        "all_zero": true
+      },
+      "dock_default_hidden": true
+    },
+    {
+      "size": [
+        1366,
+        768
+      ],
+      "min_size": [
+        1000,
+        720
+      ],
+      "splitter": {
+        "sizes": [
+          871,
+          469
+        ],
+        "left_ratio": 0.65,
+        "ratio_ok": true
+      },
+      "cells": {
+        "count": 16,
+        "max_ratio": 1.0,
+        "all_under_1_3": true
+      },
+      "overlaps": {
+        "count": 0,
+        "all_zero": true
+      },
+      "dock_default_hidden": true
+    },
+    {
+      "size": [
+        1920,
+        1080
+      ],
+      "min_size": [
+        1000,
+        720
+      ],
+      "splitter": {
+        "sizes": [
+          1231,
+          663
+        ],
+        "left_ratio": 0.65,
+        "ratio_ok": true
+      },
+      "cells": {
+        "count": 16,
+        "max_ratio": 1.0,
+        "all_under_1_3": true
+      },
+      "overlaps": {
+        "count": 0,
+        "all_zero": true
+      },
+      "dock_default_hidden": true
+    }
+  ],
+  "plot_deep": [
+    {
+      "size": [
+        1000,
+        720
+      ],
+      "right_col_w": 360,
+      "plot_visible_w": 360,
+      "plot_visible_h": 307,
+      "plot_min_hint_w": 280,
+      "plot_min_hint_h": 160,
+      "canvas_w": 356,
+      "canvas_h": 220,
+      "canvas_h_target": 180,
+      "canvas_h_ok": true,
+      "title_count": 1,
+      "title_unique": true,
+      "controls": [
+        {
+          "name": "_btn_clear",
+          "x": 79,
+          "y": 21,
+          "w": 73,
+          "h": 28,
+          "text": "清空",
+          "visible": true,
+          "inside_plot": true
+        },
+        {
+          "name": "_chk_filt",
+          "x": 108,
+          "y": 58,
+          "w": 59,
+          "h": 18,
+          "text": "滤波",
+          "visible": true,
+          "inside_plot": true
+        },
+        {
+          "name": "_btn_autorange",
+          "x": 195,
+          "y": 53,
+          "w": 86,
+          "h": 28,
+          "text": "自适应",
+          "visible": true,
+          "inside_plot": true
+        },
+        {
+          "name": "_btn_restore",
+          "x": 285,
+          "y": 53,
+          "w": 73,
+          "h": 28,
+          "text": "复位",
+          "visible": true,
+          "inside_plot": true
+        },
+        {
+          "name": "_chk_raw",
+          "x": 45,
+          "y": 58,
+          "w": 59,
+          "h": 18,
+          "text": "原始",
+          "visible": true,
+          "inside_plot": true
+        },
+        {
+          "name": "_btn_pause",
+          "x": 2,
+          "y": 21,
+          "w": 73,
+          "h": 28,
+          "text": "暂停",
+          "visible": true,
+          "inside_plot": true
+        }
+      ],
+      "overflow": [],
+      "row_conflicts": [],
+      "toolbar_right_in_plot": 358,
+      "plot_width": 360,
+      "toolbar_fits_in_right_col": true,
+      "min_hint_fits_right_col": true,
+      "functional": {
+        "pause_toggle_changes_state": true,
+        "raw_curve_present": true,
+        "filt_curve_present": true,
+        "raw_hidden_when_unchecked": true,
+        "filt_hidden_when_unchecked": true,
+        "clear_empties_curves": true,
+        "autorange_restore_no_error": true
+      },
+      "channel_panel_metrics": [
+        {
+          "name": "_m_raw",
+          "w": 99,
+          "h": 40,
+          "label": "串口采样 mV",
+          "tooltip": "串口原始采样（mV，D 帧直接给出；物理节点：A"
+        },
+        {
+          "name": "_m_filtered",
+          "w": 99,
+          "h": 40,
+          "label": "检波电压(滤波) mV",
+          "tooltip": "当前检波电压（滤波后，ADC mV）"
+        },
+        {
+          "name": "_m_vadc",
+          "missing": true
+        },
+        {
+          "name": "_m_baseline",
+          "w": 100,
+          "h": 40,
+          "label": "无钢板基线 mV",
+          "tooltip": "无钢板基线（ADC mV，历史标定参数；当前帧无"
+        },
+        {
+          "name": "_m_vout",
+          "w": 100,
+          "h": 40,
+          "label": "VOUT 估算 mV",
+          "tooltip": "检波器 VOUT 估计值（mV）= 采样 × 分"
+        },
+        {
+          "name": "_m_age",
+          "w": 99,
+          "h": 40,
+          "label": "更新",
+          "tooltip": "最后更新时间"
+        }
+      ],
+      "label_collisions": {
+        "items": [
+          {
+            "name": "_btn_clear",
+            "text": "清空",
+            "btn_w": 73,
+            "text_w": 26,
+            "fits": true
+          },
+          {
+            "name": "_chk_filt",
+            "text": "滤波",
+            "btn_w": 59,
+            "text_w": 34,
+            "fits": true
+          },
+          {
+            "name": "_btn_autorange",
+            "text": "自适应",
+            "btn_w": 86,
+            "text_w": 39,
+            "fits": true
+          },
+          {
+            "name": "_btn_restore",
+            "text": "复位",
+            "btn_w": 73,
+            "text_w": 26,
+            "fits": true
+          },
+          {
+            "name": "_chk_raw",
+            "text": "原始",
+            "btn_w": 59,
+            "text_w": 34,
+            "fits": true
+          },
+          {
+            "name": "_btn_pause",
+            "text": "暂停",
+            "btn_w": 73,
+            "text_w": 26,
+            "fits": true
+          }
+        ],
+        "all_fit": true
+      }
+    },
+    {
+      "size": [
+        1024,
+        768
+      ],
+      "right_col_w": 360,
+      "plot_visible_w": 360,
+      "plot_visible_h": 355,
+      "plot_min_hint_w": 280,
+      "plot_min_hint_h": 160,
+      "canvas_w": 356,
+      "canvas_h": 268,
+      "canvas_h_target": 190,
+      "canvas_h_ok": true,
+      "title_count": 1,
+      "title_unique": true,
+      "controls": [
+        {
+          "name": "_btn_clear",
+          "x": 79,
+          "y": 21,
+          "w": 73,
+          "h": 28,
+          "text": "清空",
+          "visible": true,
+          "inside_plot": true
+        },
+        {
+          "name": "_chk_filt",
+          "x": 108,
+          "y": 58,
+          "w": 59,
+          "h": 18,
+          "text": "滤波",
+          "visible": true,
+          "inside_plot": true
+        },
+        {
+          "name": "_btn_autorange",
+          "x": 195,
+          "y": 53,
+          "w": 86,
+          "h": 28,
+          "text": "自适应",
+          "visible": true,
+          "inside_plot": true
+        },
+        {
+          "name": "_btn_restore",
+          "x": 285,
+          "y": 53,
+          "w": 73,
+          "h": 28,
+          "text": "复位",
+          "visible": true,
+          "inside_plot": true
+        },
+        {
+          "name": "_chk_raw",
+          "x": 45,
+          "y": 58,
+          "w": 59,
+          "h": 18,
+          "text": "原始",
+          "visible": true,
+          "inside_plot": true
+        },
+        {
+          "name": "_btn_pause",
+          "x": 2,
+          "y": 21,
+          "w": 73,
+          "h": 28,
+          "text": "暂停",
+          "visible": true,
+          "inside_plot": true
+        }
+      ],
+      "overflow": [],
+      "row_conflicts": [],
+      "toolbar_right_in_plot": 358,
+      "plot_width": 360,
+      "toolbar_fits_in_right_col": true,
+      "min_hint_fits_right_col": true,
+      "functional": {
+        "pause_toggle_changes_state": true,
+        "raw_curve_present": true,
+        "filt_curve_present": true,
+        "raw_hidden_when_unchecked": true,
+        "filt_hidden_when_unchecked": true,
+        "clear_empties_curves": true,
+        "autorange_restore_no_error": true
+      },
+      "channel_panel_metrics": [
+        {
+          "name": "_m_raw",
+          "w": 99,
+          "h": 40,
+          "label": "串口采样 mV",
+          "tooltip": "串口原始采样（mV，D 帧直接给出；物理节点：A"
+        },
+        {
+          "name": "_m_filtered",
+          "w": 99,
+          "h": 40,
+          "label": "检波电压(滤波) mV",
+          "tooltip": "当前检波电压（滤波后，ADC mV）"
+        },
+        {
+          "name": "_m_vadc",
+          "missing": true
+        },
+        {
+          "name": "_m_baseline",
+          "w": 100,
+          "h": 40,
+          "label": "无钢板基线 mV",
+          "tooltip": "无钢板基线（ADC mV，历史标定参数；当前帧无"
+        },
+        {
+          "name": "_m_vout",
+          "w": 100,
+          "h": 40,
+          "label": "VOUT 估算 mV",
+          "tooltip": "检波器 VOUT 估计值（mV）= 采样 × 分"
+        },
+        {
+          "name": "_m_age",
+          "w": 99,
+          "h": 40,
+          "label": "更新",
+          "tooltip": "最后更新时间"
+        }
+      ],
+      "label_collisions": {
+        "items": [
+          {
+            "name": "_btn_clear",
+            "text": "清空",
+            "btn_w": 73,
+            "text_w": 26,
+            "fits": true
+          },
+          {
+            "name": "_chk_filt",
+            "text": "滤波",
+            "btn_w": 59,
+            "text_w": 34,
+            "fits": true
+          },
+          {
+            "name": "_btn_autorange",
+            "text": "自适应",
+            "btn_w": 86,
+            "text_w": 39,
+            "fits": true
+          },
+          {
+            "name": "_btn_restore",
+            "text": "复位",
+            "btn_w": 73,
+            "text_w": 26,
+            "fits": true
+          },
+          {
+            "name": "_chk_raw",
+            "text": "原始",
+            "btn_w": 59,
+            "text_w": 34,
+            "fits": true
+          },
+          {
+            "name": "_btn_pause",
+            "text": "暂停",
+            "btn_w": 73,
+            "text_w": 26,
+            "fits": true
+          }
+        ],
+        "all_fit": true
+      }
+    },
+    {
+      "size": [
+        1280,
+        800
+      ],
+      "right_col_w": 439,
+      "plot_visible_w": 439,
+      "plot_visible_h": 321,
+      "plot_min_hint_w": 280,
+      "plot_min_hint_h": 160,
+      "canvas_w": 435,
+      "canvas_h": 234,
+      "canvas_h_target": 210,
+      "canvas_h_ok": true,
+      "title_count": 1,
+      "title_unique": true,
+      "controls": [
+        {
+          "name": "_btn_clear",
+          "x": 79,
+          "y": 21,
+          "w": 73,
+          "h": 28,
+          "text": "清空",
+          "visible": true,
+          "inside_plot": true
+        },
+        {
+          "name": "_chk_filt",
+          "x": 108,
+          "y": 58,
+          "w": 59,
+          "h": 18,
+          "text": "滤波",
+          "visible": true,
+          "inside_plot": true
+        },
+        {
+          "name": "_btn_autorange",
+          "x": 274,
+          "y": 53,
+          "w": 86,
+          "h": 28,
+          "text": "自适应",
+          "visible": true,
+          "inside_plot": true
+        },
+        {
+          "name": "_btn_restore",
+          "x": 364,
+          "y": 53,
+          "w": 73,
+          "h": 28,
+          "text": "复位",
+          "visible": true,
+          "inside_plot": true
+        },
+        {
+          "name": "_chk_raw",
+          "x": 45,
+          "y": 58,
+          "w": 59,
+          "h": 18,
+          "text": "原始",
+          "visible": true,
+          "inside_plot": true
+        },
+        {
+          "name": "_btn_pause",
+          "x": 2,
+          "y": 21,
+          "w": 73,
+          "h": 28,
+          "text": "暂停",
+          "visible": true,
+          "inside_plot": true
+        }
+      ],
+      "overflow": [],
+      "row_conflicts": [],
+      "toolbar_right_in_plot": 437,
+      "plot_width": 439,
+      "toolbar_fits_in_right_col": true,
+      "min_hint_fits_right_col": true,
+      "functional": {
+        "pause_toggle_changes_state": true,
+        "raw_curve_present": true,
+        "filt_curve_present": true,
+        "raw_hidden_when_unchecked": true,
+        "filt_hidden_when_unchecked": true,
+        "clear_empties_curves": true,
+        "autorange_restore_no_error": true
+      },
+      "channel_panel_metrics": [
+        {
+          "name": "_m_raw",
+          "w": 119,
+          "h": 40,
+          "label": "串口采样 mV",
+          "tooltip": "串口原始采样（mV，D 帧直接给出；物理节点：A"
+        },
+        {
+          "name": "_m_filtered",
+          "w": 129,
+          "h": 40,
+          "label": "检波电压(滤波) mV",
+          "tooltip": "当前检波电压（滤波后，ADC mV）"
+        },
+        {
+          "name": "_m_vadc",
+          "missing": true
+        },
+        {
+          "name": "_m_baseline",
+          "w": 129,
+          "h": 40,
+          "label": "无钢板基线 mV",
+          "tooltip": "无钢板基线（ADC mV，历史标定参数；当前帧无"
+        },
+        {
+          "name": "_m_vout",
+          "w": 129,
+          "h": 40,
+          "label": "VOUT 估算 mV",
+          "tooltip": "检波器 VOUT 估计值（mV）= 采样 × 分"
+        },
+        {
+          "name": "_m_age",
+          "w": 119,
+          "h": 40,
+          "label": "更新",
+          "tooltip": "最后更新时间"
+        }
+      ],
+      "label_collisions": {
+        "items": [
+          {
+            "name": "_btn_clear",
+            "text": "清空",
+            "btn_w": 73,
+            "text_w": 26,
+            "fits": true
+          },
+          {
+            "name": "_chk_filt",
+            "text": "滤波",
+            "btn_w": 59,
+            "text_w": 34,
+            "fits": true
+          },
+          {
+            "name": "_btn_autorange",
+            "text": "自适应",
+            "btn_w": 86,
+            "text_w": 39,
+            "fits": true
+          },
+          {
+            "name": "_btn_restore",
+            "text": "复位",
+            "btn_w": 73,
+            "text_w": 26,
+            "fits": true
+          },
+          {
+            "name": "_chk_raw",
+            "text": "原始",
+            "btn_w": 59,
+            "text_w": 34,
+            "fits": true
+          },
+          {
+            "name": "_btn_pause",
+            "text": "暂停",
+            "btn_w": 73,
+            "text_w": 26,
+            "fits": true
+          }
+        ],
+        "all_fit": true
+      }
+    },
+    {
+      "size": [
+        1360,
+        840
+      ],
+      "right_col_w": 467,
+      "plot_visible_w": 467,
+      "plot_visible_h": 361,
+      "plot_min_hint_w": 280,
+      "plot_min_hint_h": 160,
+      "canvas_w": 463,
+      "canvas_h": 274,
+      "canvas_h_target": 230,
+      "canvas_h_ok": true,
+      "title_count": 1,
+      "title_unique": true,
+      "controls": [
+        {
+          "name": "_btn_clear",
+          "x": 79,
+          "y": 21,
+          "w": 73,
+          "h": 28,
+          "text": "清空",
+          "visible": true,
+          "inside_plot": true
+        },
+        {
+          "name": "_chk_filt",
+          "x": 108,
+          "y": 58,
+          "w": 59,
+          "h": 18,
+          "text": "滤波",
+          "visible": true,
+          "inside_plot": true
+        },
+        {
+          "name": "_btn_autorange",
+          "x": 302,
+          "y": 53,
+          "w": 86,
+          "h": 28,
+          "text": "自适应",
+          "visible": true,
+          "inside_plot": true
+        },
+        {
+          "name": "_btn_restore",
+          "x": 392,
+          "y": 53,
+          "w": 73,
+          "h": 28,
+          "text": "复位",
+          "visible": true,
+          "inside_plot": true
+        },
+        {
+          "name": "_chk_raw",
+          "x": 45,
+          "y": 58,
+          "w": 59,
+          "h": 18,
+          "text": "原始",
+          "visible": true,
+          "inside_plot": true
+        },
+        {
+          "name": "_btn_pause",
+          "x": 2,
+          "y": 21,
+          "w": 73,
+          "h": 28,
+          "text": "暂停",
+          "visible": true,
+          "inside_plot": true
+        }
+      ],
+      "overflow": [],
+      "row_conflicts": [],
+      "toolbar_right_in_plot": 465,
+      "plot_width": 467,
+      "toolbar_fits_in_right_col": true,
+      "min_hint_fits_right_col": true,
+      "functional": {
+        "pause_toggle_changes_state": true,
+        "raw_curve_present": true,
+        "filt_curve_present": true,
+        "raw_hidden_when_unchecked": true,
+        "filt_hidden_when_unchecked": true,
+        "clear_empties_curves": true,
+        "autorange_restore_no_error": true
+      },
+      "channel_panel_metrics": [
+        {
+          "name": "_m_raw",
+          "w": 119,
+          "h": 40,
+          "label": "串口采样 mV",
+          "tooltip": "串口原始采样（mV，D 帧直接给出；物理节点：A"
+        },
+        {
+          "name": "_m_filtered",
+          "w": 143,
+          "h": 40,
+          "label": "检波电压(滤波) mV",
+          "tooltip": "当前检波电压（滤波后，ADC mV）"
+        },
+        {
+          "name": "_m_vadc",
+          "missing": true
+        },
+        {
+          "name": "_m_baseline",
+          "w": 143,
+          "h": 40,
+          "label": "无钢板基线 mV",
+          "tooltip": "无钢板基线（ADC mV，历史标定参数；当前帧无"
+        },
+        {
+          "name": "_m_vout",
+          "w": 143,
+          "h": 40,
+          "label": "VOUT 估算 mV",
+          "tooltip": "检波器 VOUT 估计值（mV）= 采样 × 分"
+        },
+        {
+          "name": "_m_age",
+          "w": 119,
+          "h": 40,
+          "label": "更新",
+          "tooltip": "最后更新时间"
+        }
+      ],
+      "label_collisions": {
+        "items": [
+          {
+            "name": "_btn_clear",
+            "text": "清空",
+            "btn_w": 73,
+            "text_w": 26,
+            "fits": true
+          },
+          {
+            "name": "_chk_filt",
+            "text": "滤波",
+            "btn_w": 59,
+            "text_w": 34,
+            "fits": true
+          },
+          {
+            "name": "_btn_autorange",
+            "text": "自适应",
+            "btn_w": 86,
+            "text_w": 39,
+            "fits": true
+          },
+          {
+            "name": "_btn_restore",
+            "text": "复位",
+            "btn_w": 73,
+            "text_w": 26,
+            "fits": true
+          },
+          {
+            "name": "_chk_raw",
+            "text": "原始",
+            "btn_w": 59,
+            "text_w": 34,
+            "fits": true
+          },
+          {
+            "name": "_btn_pause",
+            "text": "暂停",
+            "btn_w": 73,
+            "text_w": 26,
+            "fits": true
+          }
+        ],
+        "all_fit": true
+      }
+    },
+    {
+      "size": [
+        1440,
+        900
+      ],
+      "right_col_w": 495,
+      "plot_visible_w": 495,
+      "plot_visible_h": 421,
+      "plot_min_hint_w": 280,
+      "plot_min_hint_h": 160,
+      "canvas_w": 491,
+      "canvas_h": 334,
+      "canvas_h_target": 260,
+      "canvas_h_ok": true,
+      "title_count": 1,
+      "title_unique": true,
+      "controls": [
+        {
+          "name": "_btn_clear",
+          "x": 79,
+          "y": 21,
+          "w": 73,
+          "h": 28,
+          "text": "清空",
+          "visible": true,
+          "inside_plot": true
+        },
+        {
+          "name": "_chk_filt",
+          "x": 108,
+          "y": 58,
+          "w": 59,
+          "h": 18,
+          "text": "滤波",
+          "visible": true,
+          "inside_plot": true
+        },
+        {
+          "name": "_btn_autorange",
+          "x": 330,
+          "y": 53,
+          "w": 86,
+          "h": 28,
+          "text": "自适应",
+          "visible": true,
+          "inside_plot": true
+        },
+        {
+          "name": "_btn_restore",
+          "x": 420,
+          "y": 53,
+          "w": 73,
+          "h": 28,
+          "text": "复位",
+          "visible": true,
+          "inside_plot": true
+        },
+        {
+          "name": "_chk_raw",
+          "x": 45,
+          "y": 58,
+          "w": 59,
+          "h": 18,
+          "text": "原始",
+          "visible": true,
+          "inside_plot": true
+        },
+        {
+          "name": "_btn_pause",
+          "x": 2,
+          "y": 21,
+          "w": 73,
+          "h": 28,
+          "text": "暂停",
+          "visible": true,
+          "inside_plot": true
+        }
+      ],
+      "overflow": [],
+      "row_conflicts": [],
+      "toolbar_right_in_plot": 493,
+      "plot_width": 495,
+      "toolbar_fits_in_right_col": true,
+      "min_hint_fits_right_col": true,
+      "functional": {
+        "pause_toggle_changes_state": true,
+        "raw_curve_present": true,
+        "filt_curve_present": true,
+        "raw_hidden_when_unchecked": true,
+        "filt_hidden_when_unchecked": true,
+        "clear_empties_curves": true,
+        "autorange_restore_no_error": true
+      },
+      "channel_panel_metrics": [
+        {
+          "name": "_m_raw",
+          "w": 132,
+          "h": 40,
+          "label": "串口采样 mV",
+          "tooltip": "串口原始采样（mV，D 帧直接给出；物理节点：A"
+        },
+        {
+          "name": "_m_filtered",
+          "w": 157,
+          "h": 40,
+          "label": "检波电压(滤波) mV",
+          "tooltip": "当前检波电压（滤波后，ADC mV）"
+        },
+        {
+          "name": "_m_vadc",
+          "missing": true
+        },
+        {
+          "name": "_m_baseline",
+          "w": 144,
+          "h": 40,
+          "label": "无钢板基线 mV",
+          "tooltip": "无钢板基线（ADC mV，历史标定参数；当前帧无"
+        },
+        {
+          "name": "_m_vout",
+          "w": 144,
+          "h": 40,
+          "label": "VOUT 估算 mV",
+          "tooltip": "检波器 VOUT 估计值（mV）= 采样 × 分"
+        },
+        {
+          "name": "_m_age",
+          "w": 132,
+          "h": 40,
+          "label": "更新",
+          "tooltip": "最后更新时间"
+        }
+      ],
+      "label_collisions": {
+        "items": [
+          {
+            "name": "_btn_clear",
+            "text": "清空",
+            "btn_w": 73,
+            "text_w": 26,
+            "fits": true
+          },
+          {
+            "name": "_chk_filt",
+            "text": "滤波",
+            "btn_w": 59,
+            "text_w": 34,
+            "fits": true
+          },
+          {
+            "name": "_btn_autorange",
+            "text": "自适应",
+            "btn_w": 86,
+            "text_w": 39,
+            "fits": true
+          },
+          {
+            "name": "_btn_restore",
+            "text": "复位",
+            "btn_w": 73,
+            "text_w": 26,
+            "fits": true
+          },
+          {
+            "name": "_chk_raw",
+            "text": "原始",
+            "btn_w": 59,
+            "text_w": 34,
+            "fits": true
+          },
+          {
+            "name": "_btn_pause",
+            "text": "暂停",
+            "btn_w": 73,
+            "text_w": 26,
+            "fits": true
+          }
+        ],
+        "all_fit": true
+      }
+    }
+  ],
+  "heatmap_navigation": {
+    "right_from_0": 4,
+    "down_from_right": 4,
+    "expected": {
+      "right_from_0": 4,
+      "down_from_right": 4
+    },
+    "ok": true
+  },
+  "tooltips": {
+    "ok": true,
+    "fields": {
+      "衰减量": true,
+      "无钢板基线": true,
+      "检波电压(滤波)": true,
+      "串口采样": true,
+      "VOUT 估算": true,
+      "本帧有效": true,
+      "更新": true
+    },
+    "tip": "CH01\n位置: R4C1\n状态: \n衰减量: +12.500 mV\n下降比例: +0.10 %\n无钢板基线: 12000.000 mV\n检波电压(滤波): 11987.500 mV\n串口采样: 11987.500 mV\nVOUT 估算: 23975.000 mV\n衰减量=基线−滤波；正值: 信号下降；负值: 信号升高\n本帧有效: 是\n更新: 0.0s 前"
+  },
+  "shortcuts": {
+    "present": [
+      "Ctrl+,",
+      "Ctrl+O",
+      "Ctrl+Shift+R",
+      "Esc",
+      "F5",
+      "Space"
+    ],
+    "all_present": true
+  },
+  "accessible_names": {
+    "_btn_connect": "连接串口",
+    "_btn_disconnect": "断开串口",
+    "_btn_demo": "开启演示模式",
+    "_btn_rec": "开始或停止记录",
+    "_btn_calib": "开始无钢板基线标定",
+    "_btn_refresh": "刷新串口列表",
+    "_btn_settings": "",
+    "_btn_diag": "",
+    "_btn_about": ""
+  },
+  "record_button_role": {
+    "initial_role": "primary",
+    "danger_role_supported": true
+  },
+  "calib_eta": {
+    "progress_text_has_eta": true,
+    "label": "标定中 50/200 (25%)  帧 60/200  ETA 15.0s"
+  },
+  "message_bar": {
+    "initial_hidden": true,
+    "show_works": true,
+    "clear_works": true
+  },
+  "replay_mutex": {
+    "replay_rec_disabled": true,
+    "replay_calib_disabled": true,
+    "replay_controls_visible": true,
+    "live_restored": true
+  },
+  "source_exclusivity": {
+    "serial_stopped": true,
+    "demo_stopped": true
+  },
+  "contrast": {
+    "all_ok": true,
+    "items": [
+      {
+        "bg": "#0F2862",
+        "name": "heat_neg",
+        "fg": "#ffffff",
+        "ratio": 5.19,
+        "ok": true
+      },
+      {
+        "bg": "#7A1212",
+        "name": "heat_pos",
+        "fg": "#ffffff",
+        "ratio": 5.07,
+        "ok": true
+      },
+      {
+        "bg": "#F8FAFC",
+        "name": "surface",
+        "fg": "#17212b",
+        "ratio": 5.92,
+        "ok": true
+      },
+      {
+        "bg": "#F4DCD9",
+        "name": "danger_subtle",
+        "fg": "#17212b",
+        "ratio": 5.36,
+        "ok": true
+      }
+    ]
+  },
+  "channel_map": {
+    "all_16_channels": true,
+    "valid_positions": true,
+    "unique_positions": true,
+    "matches_config_map": true,
+    "matches_hardware_layout": true,
+    "bottom_left_is_ch01": true,
+    "top_right_is_ch16": true
+  }
+}

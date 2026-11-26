@@ -1,0 +1,19 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+env/
+*.egg-info/
+
+# ---- PyInstaller 构建产物 ----
+build/
+dist/
+*.pkg
+*.pyz
+
+# ---- 日志与临时文件 ----
+*.log
+.DS_Store
+Thumbs.db
