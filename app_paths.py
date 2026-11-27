@@ -43,6 +43,20 @@ def get_config_path() -> Path:
     return get_config_dir() / "config.json"
 
 
+def get_calibration_dir() -> Path:
+    """保留工程中的旧标定目录，独立运行时使用用户数据目录。"""
+    if _is_frozen():
+        app_dir = Path(sys.executable).resolve().parent
+    else:
+        app_dir = Path(__file__).resolve().parent
+    directories = (app_dir, app_dir.parent) if app_dir.name.lower() == "dist" else (app_dir,)
+    for directory in directories:
+        calibration_dir = directory / "涡流标定"
+        if calibration_dir.is_dir():
+            return calibration_dir
+    return get_config_dir()
+
+
 def get_default_csv_dir() -> Path:
     """
     获取默认 CSV 保存目录。

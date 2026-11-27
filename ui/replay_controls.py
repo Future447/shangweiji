@@ -7,12 +7,11 @@ ui/replay_controls.py — 回放模式控制条。
 
 from __future__ import annotations
 
-from typing import Optional
+from pathlib import Path
 
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtWidgets import (
     QComboBox,
-    QFileDialog,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -20,8 +19,9 @@ from PyQt5.QtWidgets import (
     QSlider,
     QStyle,
     QVBoxLayout,
-    QWidget,
 )
+
+from ui.components import ElidingLabel
 
 
 class ReplayControls(QFrame):
@@ -38,6 +38,7 @@ class ReplayControls(QFrame):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setObjectName("ReplayControls")
+        self._total_rows = 0
         self._build_ui()
         self.set_speed(1.0)
         self.set_state("stopped")
@@ -95,7 +96,10 @@ class ReplayControls(QFrame):
         self._cmb_speed.setAccessibleName("回放速度")
         row.addWidget(self._cmb_speed)
 
-        row.addStretch(1)
+        self._lbl_file = ElidingLabel("未打开文件")
+        self._lbl_file.setObjectName("Caption")
+        self._lbl_file.setMinimumWidth(60)
+        row.addWidget(self._lbl_file, 1)
         self._lbl_state = QLabel("未加载")
         self._lbl_state.setObjectName("Caption")
         row.addWidget(self._lbl_state)
@@ -111,7 +115,7 @@ class ReplayControls(QFrame):
         self._slider.setEnabled(False)
         self._slider.setAccessibleName("回放时间位置")
         self._slider.sliderMoved.connect(self.seek_requested.emit)
-        srow.addWidget(QLabel("时间:"))
+        srow.addWidget(QLabel("进度"))
         srow.addWidget(self._slider, 1)
         self._lbl_t = QLabel("0/0")
         self._lbl_t.setObjectName("Caption")
@@ -141,29 +145,28 @@ class ReplayControls(QFrame):
             "paused": "已暂停",
             "ended": "已结束",
         }
-        self._lbl_state.setText(text_map.get(state, state))
+        self._lbl_state.setText(text_map.get(state, state) if self._total_rows else "未加载")
         self.state_changed.emit(state)
         playing = state == "playing"
-        self._btn_play.setEnabled(state in ("stopped", "paused", "ended"))
+        self._btn_play.setEnabled(self._total_rows > 0 and state in ("stopped", "paused", "ended"))
         self._btn_pause.setEnabled(playing)
         self._btn_stop.setEnabled(state in ("playing", "paused"))
 
     def set_loaded(self, total_rows: int) -> None:
-        self._slider.blockSignals(True)
+        self._total_rows = total_rows
         self._slider.setMaximum(max(0, total_rows - 1))
-        self._slider.setValue(0)
         self._slider.setEnabled(total_rows > 0)
-        self._slider.blockSignals(False)
-        self._lbl_t.setText(f"0/{total_rows}")
+        self.set_index(None)
+        self.set_state("stopped")
 
-    def set_index(self, index: int) -> None:
-        self._slider.blockSignals(True)
-        self._slider.setValue(index)
-        self._slider.blockSignals(False)
-        self._lbl_t.setText(f"{index}/{self._slider.maximum() + 1}")
+    def set_index(self, index: int | None) -> None:
+        showing_row = index is not None and self._total_rows > 0
+        display_index = min(max(0, index), self._total_rows - 1) if showing_row else 0
+        self._slider.setValue(display_index)
+        count = display_index + 1 if showing_row else 0
+        self._lbl_t.setText(f"{count}/{self._total_rows}")
 
     def set_open_path(self, path: str) -> None:
-        """打开后，更新标签显示。"""
-        if path:
-            import os
-            self._lbl_state.setText(os.path.basename(path))
+        """让当前文件名在播放状态切换后继续可见。"""
+        self._lbl_file.setText(Path(path).name if path else "未打开文件")
+        self._lbl_file.setToolTip(path)

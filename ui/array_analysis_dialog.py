@@ -7,12 +7,13 @@ import re
 from pathlib import Path
 
 import numpy as np
+from app_paths import get_calibration_dir
 from PyQt5.QtCore import QIODevice, QSaveFile, Qt, QTimer, pyqtSignal
 from PyQt5.QtWidgets import (
     QCheckBox, QComboBox, QDialog, QDoubleSpinBox, QFileDialog,
     QGridLayout, QGroupBox, QHBoxLayout, QHeaderView, QLabel, QListWidget,
-    QListWidgetItem, QPushButton, QSpinBox, QTableWidget, QTableWidgetItem,
-    QVBoxLayout,
+    QListWidgetItem, QPushButton, QSizePolicy, QSpinBox, QTableWidget, QTableWidgetItem,
+    QToolButton, QVBoxLayout, QWidget,
 )
 
 from core.array_analysis import ArrayAnalysis, compensate_common_response, coverage_grid, spatial_differences
@@ -26,11 +27,17 @@ class ArrayAnalysisDialog(QDialog):
     display_result_changed = pyqtSignal(object)
     calibration_applied = pyqtSignal()
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, *, embedded=False):
         super().__init__(parent)
+        self._embedded = bool(embedded)
+        self._workspace_active = not self._embedded
+        if self._embedded:
+            self.setWindowFlags(Qt.Widget)
+            self.setObjectName("ArrayCalibrationPanel")
         self.setWindowTitle("阵列局部识别")
         self.setModal(False)
-        self.resize(900, 760)
+        if not self._embedded:
+            self.resize(900, 760)
         self._context_key = None
         self._token = None
         self._channel_map = {}
@@ -43,8 +50,7 @@ class ArrayAnalysisDialog(QDialog):
         self._capture = None
         self._pending = None
         self._pending_reason = ""
-        calibration_dir = Path(__file__).resolve().parent.parent / "涡流标定"
-        self._last_directory = calibration_dir if calibration_dir.is_dir() else calibration_dir.parent
+        self._last_directory = get_calibration_dir()
         self._message = "已有标定可直接加载；连接匹配的设备后会自动启用。"
         self._build_ui()
         self._capture_timer = QTimer(self)
@@ -52,7 +58,8 @@ class ArrayAnalysisDialog(QDialog):
         self._capture_timer.timeout.connect(self._capture_timeout)
         self._display_timer = QTimer(self)
         self._display_timer.timeout.connect(self._render)
-        self._display_timer.start(100)
+        if self._workspace_active:
+            self._display_timer.start(100)
         self._update_controls()
 
     def _build_ui(self):
@@ -62,14 +69,17 @@ class ArrayAnalysisDialog(QDialog):
         self.context_label.setTextFormat(Qt.PlainText)
         layout.addWidget(self.context_label)
         hint = QLabel(
+            "已有标定：加载 → 移远铁板并重采当前空场。新标定：选方向 → 采空场 → 在已知板位驻停采模板 → 保存。\n"
+            "位置单位 p 为线圈中心距；0 为进入侧边界，负值在阵列外，4 为全覆盖。"
+            if self._embedded else
             "加载已有标定后，将铁板移远，点击“重采当前空场（保留模板）”更新本次测量的零点。\n"
             "新标定：连接设备 → 选进入方向 → 铁板移远采空场 → 铁板驻停于多个已知位置逐次采模板 → 保存。\n"
             "位置 p 为线圈中心距；0 为进入侧网格边界，负值为阵列外，4 为四格全覆盖。差分采用 ADC 原始毫伏值的 当前－空场。"
         )
         hint.setObjectName("arrayUsage")
         hint.setWordWrap(True)
-        layout.addWidget(hint)
-        controls = QGridLayout()
+        if not self._embedded:
+            layout.addWidget(hint)
         self.direction_combo = QComboBox()
         self.direction_combo.setObjectName("arrayDirection")
         for title, value in (("左侧进入 →", "left"), ("右侧进入 ←", "right"),
@@ -87,10 +97,14 @@ class ArrayAnalysisDialog(QDialog):
         self.position_spin.setSingleStep(0.25)
         self.position_spin.setSuffix(" p")
         self.position_spin.setValue(-1)
-        controls.addWidget(QLabel("铁板进入方向"), 0, 0)
-        controls.addWidget(self.direction_combo, 0, 1)
-        controls.addWidget(QLabel("每次有效帧数"), 0, 2)
-        controls.addWidget(self.frame_count, 0, 3)
+        self.position_spin.setToolTip("位置 p 为线圈中心距；0 为进入侧网格边界，负值为阵列外，4 为全覆盖。")
+        if self._embedded:
+            self.position_spin.setPrefix("板位 ")
+        direction_label = QLabel("进入方向" if self._embedded else "铁板进入方向")
+        direction_label.setBuddy(self.direction_combo)
+        frames_label = QLabel("帧数" if self._embedded else "每次有效帧数")
+        frames_label.setBuddy(self.frame_count)
+        self.frame_count.setToolTip("每次标定所需的完整新帧数。")
         self.baseline_button = QPushButton("采集独立空场")
         self.baseline_button.setObjectName("arrayCaptureBaseline")
         self.baseline_button.clicked.connect(lambda: self._start_capture("baseline"))
@@ -104,25 +118,54 @@ class ArrayAnalysisDialog(QDialog):
         self.cancel_button = QPushButton("取消本次采集")
         self.cancel_button.setObjectName("arrayCancelCapture")
         self.cancel_button.clicked.connect(self._cancel_clicked)
-        controls.addWidget(self.baseline_button, 1, 0, 1, 2)
-        controls.addWidget(self.position_spin, 1, 2)
-        controls.addWidget(self.template_button, 1, 3)
-        controls.addWidget(self.cancel_button, 2, 3)
         self.calibration_label = QLabel("尚未采集独立空场")
-        controls.addWidget(self.calibration_label, 2, 0, 1, 3)
-        controls.addWidget(self.rebase_button, 3, 0, 1, 2)
-        layout.addLayout(controls)
+        self.calibration_label.setWordWrap(True)
+        self.calibration_label.setTextFormat(Qt.PlainText)
+        if self._embedded:
+            settings_row = QHBoxLayout()
+            settings_row.addWidget(direction_label)
+            settings_row.addWidget(self.direction_combo, 1)
+            settings_row.addWidget(frames_label)
+            settings_row.addWidget(self.frame_count, 1)
+            layout.addLayout(settings_row)
+            baseline_row = QHBoxLayout()
+            baseline_row.addWidget(self.baseline_button, 1)
+            baseline_row.addWidget(self.rebase_button, 1)
+            layout.addLayout(baseline_row)
+            template_row = QHBoxLayout()
+            template_row.addWidget(self.position_spin, 1)
+            template_row.addWidget(self.template_button, 1)
+            layout.addLayout(template_row)
+        else:
+            controls = QGridLayout()
+            controls.addWidget(direction_label, 0, 0)
+            controls.addWidget(self.direction_combo, 0, 1)
+            controls.addWidget(frames_label, 0, 2)
+            controls.addWidget(self.frame_count, 0, 3)
+            controls.addWidget(self.baseline_button, 1, 0, 1, 2)
+            controls.addWidget(self.position_spin, 1, 2)
+            controls.addWidget(self.template_button, 1, 3)
+            controls.addWidget(self.cancel_button, 2, 3)
+            controls.addWidget(self.calibration_label, 2, 0, 1, 3)
+            controls.addWidget(self.rebase_button, 3, 0, 1, 2)
+            layout.addLayout(controls)
         body = QHBoxLayout()
         maps = QVBoxLayout()
         self.delta_table = self._make_table("arrayDeltaTable")
         self.coverage_table = self._make_table("arrayCoverageTable")
-        for title, table in (("当前－空场 / mV（颜色范围随帧变化）", self.delta_table),
-                             ("直边几何覆盖估计 / %（？表示位置结果有分歧）", self.coverage_table)):
-            group = QGroupBox(title)
-            group_layout = QVBoxLayout(group)
-            group_layout.addWidget(table)
-            maps.addWidget(group)
-        body.addLayout(maps, 3)
+        if self._embedded:
+            # 保留表格对象和更新接口以兼容已有测试/调用；结果由主热图显示。
+            for table in (self.delta_table, self.coverage_table):
+                table.setParent(self)
+                table.hide()
+        else:
+            for title, table in (("当前－空场 / mV（颜色范围随帧变化）", self.delta_table),
+                                 ("直边几何覆盖估计 / %（？表示位置结果有分歧）", self.coverage_table)):
+                group = QGroupBox(title)
+                group_layout = QVBoxLayout(group)
+                group_layout.addWidget(table)
+                maps.addWidget(group)
+            body.addLayout(maps, 3)
         templates = QVBoxLayout()
         templates.addWidget(QLabel("已采位置模板（相同位置重采会替换）"))
         self.template_list = QListWidget()
@@ -139,24 +182,52 @@ class ArrayAnalysisDialog(QDialog):
         self.load_button = QPushButton("加载标定…")
         self.load_button.setObjectName("arrayLoadCalibration")
         self.load_button.clicked.connect(self._load_clicked)
-        templates.addWidget(self.save_button)
-        templates.addWidget(self.load_button)
         self.pending_button = QPushButton("取消待启用的文件")
         self.pending_button.setObjectName("arrayCancelPending")
         self.pending_button.clicked.connect(self._cancel_pending)
-        templates.addWidget(self.pending_button)
-        body.addLayout(templates, 2)
-        layout.addLayout(body, 1)
+        if self._embedded:
+            files = QHBoxLayout()
+            files.addWidget(self.load_button)
+            files.addWidget(self.save_button)
+            files.addWidget(self.pending_button)
+            files.addStretch(1)
+            layout.insertLayout(1, files)
+            layout.insertWidget(2, self.calibration_label)
+            self.details_toggle = QToolButton(self)
+            self.details_toggle.setObjectName("arrayDetailsToggle")
+            self.details_toggle.setText("位置模板与高级设置")
+            self.details_toggle.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+            self.details_toggle.setCheckable(True)
+            self.details_toggle.setArrowType(Qt.RightArrow)
+            self.details_widget = QWidget(self)
+            self.details_widget.setObjectName("arrayDetails")
+            details = QVBoxLayout(self.details_widget)
+            details.setContentsMargins(0, 0, 0, 0)
+            details.addWidget(hint)
+            self.template_list.setMaximumHeight(95)
+            details.addLayout(templates)
+            self.details_widget.hide()
+            self.details_toggle.toggled.connect(self._toggle_details)
+            layout.addWidget(self.details_toggle)
+        else:
+            templates.addWidget(self.save_button)
+            templates.addWidget(self.load_button)
+            templates.addWidget(self.pending_button)
+            body.addLayout(templates, 2)
+            layout.addLayout(body, 1)
         self.differences_label = QLabel("邻差 / mV　等待独立空场及有效帧")
         self.differences_label.setObjectName("arrayDifferences")
         self.differences_label.setWordWrap(True)
-        layout.addWidget(self.differences_label)
+        if not self._embedded:
+            layout.addWidget(self.differences_label)
         thresholds = QHBoxLayout()
-        self.threshold_enabled = QCheckBox("启用残差拒判阈值（须用独立数据验证）")
+        self.threshold_enabled = QCheckBox("启用板位拒判")
         self.threshold_enabled.setObjectName("arrayThresholdEnabled")
+        self.threshold_enabled.setToolTip("按独立板位数据验证；匹配误差超过限值时，板位和覆盖率显示未知。")
         self.threshold_enabled.toggled.connect(self._threshold_changed)
         self.threshold_spin = QDoubleSpinBox()
         self.threshold_spin.setObjectName("arrayThreshold")
+        self.threshold_spin.setToolTip("当前帧与板位模板之间的标准化残差限值，用独立复扫确定。")
         self.threshold_spin.setRange(0.001, 1000000)
         self.threshold_spin.setDecimals(3)
         self.threshold_spin.setValue(3)
@@ -164,17 +235,82 @@ class ArrayAnalysisDialog(QDialog):
         thresholds.addWidget(self.threshold_enabled)
         thresholds.addWidget(self.threshold_spin)
         thresholds.addStretch()
-        layout.addLayout(thresholds)
+        if self._embedded:
+            details.addLayout(thresholds)
+            details.addWidget(self.differences_label)
+            layout.addWidget(self.details_widget)
+        else:
+            layout.addLayout(thresholds)
         self.estimate_label = QLabel("位置估计　等待有效帧")
         self.estimate_label.setObjectName("arrayEstimate")
         self.estimate_label.setWordWrap(True)
-        layout.addWidget(self.estimate_label)
+        if self._embedded:
+            layout.insertWidget(1, self.estimate_label)
+        else:
+            layout.addWidget(self.estimate_label)
         self.status_label = QLabel(self._message)
         self.status_label.setObjectName("arrayStatus")
         self.status_label.setWordWrap(True)
         self.status_label.setTextFormat(Qt.PlainText)
-        layout.addWidget(self.status_label)
+        if self._embedded:
+            status_row = QHBoxLayout()
+            status_row.addWidget(self.status_label, 1)
+            status_row.addWidget(self.cancel_button)
+            layout.insertLayout(2, status_row)
+        else:
+            layout.addWidget(self.status_label)
+        if self._embedded:
+            layout.setContentsMargins(0, 0, 0, 0)
+            layout.setSpacing(3)
+            self.setStyleSheet("""
+                #ArrayCalibrationPanel QPushButton {
+                    min-height: 20px;
+                    max-height: 20px;
+                    padding: 3px 9px;
+                }
+                #ArrayCalibrationPanel QPushButton:focus { padding: 2px 8px; }
+                #ArrayCalibrationPanel QComboBox,
+                #ArrayCalibrationPanel QSpinBox,
+                #ArrayCalibrationPanel QDoubleSpinBox {
+                    min-height: 20px;
+                    max-height: 20px;
+                }
+                #ArrayCalibrationPanel QDoubleSpinBox { padding: 2px 2px; }
+            """)
+            for button in self.findChildren(QPushButton):
+                button.setAutoDefault(False)
+                button.setDefault(False)
+            for label in (self.context_label, self.estimate_label, self.status_label, self.calibration_label):
+                policy = label.sizePolicy()
+                policy.setHorizontalPolicy(QSizePolicy.Ignored)
+                label.setSizePolicy(policy)
         self._clear_display()
+
+    def _toggle_details(self, expanded):
+        self.details_widget.setVisible(expanded)
+        self.details_toggle.setArrowType(Qt.DownArrow if expanded else Qt.RightArrow)
+
+    def set_workspace_active(self, active):
+        """控制嵌入工作区的刷新；来源切换和采集取消仍由调用方管理。"""
+        self._workspace_active = bool(active)
+        if self._workspace_active:
+            self._display_timer.start(100)
+            self._render()
+        else:
+            self._display_timer.stop()
+
+    def is_capturing(self):
+        return self._capture is not None
+
+    def reject(self):
+        if not self._embedded:
+            super().reject()
+
+    def keyPressEvent(self, event):
+        if self._embedded and event.key() == Qt.Key_Escape:
+            event.accept()
+            return
+        super().keyPressEvent(event)
 
     def _make_table(self, name):
         table = QTableWidget(4, 4)
@@ -199,8 +335,10 @@ class ArrayAnalysisDialog(QDialog):
             key = None
             description = f"{description}；需确认完整的 16 路物理位置映射"
         token = None if key is None else (json.dumps(key, sort_keys=True, default=str), tuple(sorted(mapping.items())))
-        if self.context_label.text() != str(description):
-            self.context_label.setText(str(description))
+        description = str(description)
+        if self.context_label.text() != description:
+            self.context_label.setText(description)
+            self.context_label.setToolTip(description)
         if token == self._token:
             if self._pending is not None:
                 self._try_activate_pending()
@@ -371,6 +509,8 @@ class ArrayAnalysisDialog(QDialog):
         self.rebase_button.setEnabled(collecting and self._model.has_model)
         self.template_button.setEnabled(collecting and self._model.baseline is not None)
         self.cancel_button.setEnabled(not idle)
+        if self._embedded:
+            self.cancel_button.setVisible(not idle)
         self.direction_combo.setEnabled(idle and not self._model.positions and not pending)
         self.frame_count.setEnabled(idle)
         self.position_spin.setEnabled(idle)
@@ -385,14 +525,18 @@ class ArrayAnalysisDialog(QDialog):
             calibration = self._pending
             direction = self.direction_combo.itemText(self.direction_combo.findData(calibration["direction"]))
             self.calibration_label.setText(f"待启用 {calibration['name']} · {len(calibration['model'].positions)} 个位置 · {direction}")
-        elif active and self._model.baseline is not None:
+        elif active and self._model.has_model:
             zero = "已重采当前空场" if self._model.session_baseline is not None else "使用原标定空场"
-            self.calibration_label.setText(f"标定已启用 · {len(self._model.positions)} 个位置 · {self.direction_combo.currentText()} · {zero}")
+            self.calibration_label.setText(f"板位标定就绪 · {len(self._model.positions)} 个位置 · {self.direction_combo.currentText()} · {zero}")
+        elif active and self._model.baseline is not None:
+            self.calibration_label.setText(f"空场已启用 · {len(self._model.positions)}/2 个板位模板")
         elif not active:
             self.calibration_label.setText("当前无已启用的数据源；支持先加载标定文件")
         else:
             self.calibration_label.setText("当前来源尚未标定；可加载已有文件或采集新空场")
         self.status_label.setText(self._pending_reason if pending else self._message)
+        self.status_label.setToolTip(self.status_label.text())
+        self.calibration_label.setToolTip(self.calibration_label.text())
 
     def _clear_display(self):
         for table in (self.delta_table, self.coverage_table):
@@ -409,7 +553,7 @@ class ArrayAnalysisDialog(QDialog):
         direction = self.direction_combo.currentData()
         snapshot = {
             "coverage": np.full((4, 4), np.nan), "fresh": False,
-            "corrected": None, "common_mv": None, "reference_count": 0,
+            "attenuation": None, "corrected": None, "common_mv": None, "reference_count": 0,
             "state": "inactive", "status": self._message,
             "direction": direction, "channel_map": dict(self._channel_map),
             "position": None, "range": None, "score": None, "result": None,
@@ -439,7 +583,7 @@ class ArrayAnalysisDialog(QDialog):
             state, text = "untrained", "独立空场已启用，请再采集至少两个不同位置的模板。"
         elif result.rejected:
             guide = (
-                "先移远铁板，再在「覆盖分析」中重采当前空场。"
+                "先移远铁板，再重采当前空场（保留模板）。"
                 if self._model.session_baseline is None
                 else "请核对板位、进入方向和提离；在超限位置补采模板。"
             )
@@ -456,21 +600,24 @@ class ArrayAnalysisDialog(QDialog):
         if self._held:
             state, text = "held", f"回放已暂停或结束，保留最后一帧。{text}"
         coverage = coverage_grid(result.range, direction)
+        channels = np.empty((4, 4), dtype=int)
+        for channel, location in self._channel_map.items():
+            channels[location] = channel
+        attenuation = -result.delta[channels]
         snapshot.update(
             coverage=coverage, fresh=self._model.has_model and not self._held,
             state=state, status=text, position=result.position, range=result.range, score=result.score, result=result,
+            attenuation=attenuation,
         )
         if result.range is not None:
-            channels = np.empty((4, 4), dtype=int)
-            for channel, location in self._channel_map.items():
-                channels[location] = channel
             gains = self._model.common_response_gains(channels, direction)
-            corrected, common_mv, reference_count = compensate_common_response(-result.delta[channels], coverage, gains)
+            corrected, common_mv, reference_count = compensate_common_response(attenuation, coverage, gains)
             snapshot.update(corrected=corrected, common_mv=common_mv, reference_count=reference_count)
         return snapshot
 
     def _render(self):
         snapshot = self.coverage_snapshot()
+        self.estimate_label.setToolTip(snapshot["status"])
         if self._pending is not None:
             self._clear_display()
             self.estimate_label.setText("标定文件已读取，匹配来源与工况后启用；当前覆盖未知。")

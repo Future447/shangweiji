@@ -33,6 +33,11 @@ from core.channel_layout import parse_compact_map
 SUPPORTED_SCHEMA_VERSIONS = (3, 4)
 SUPPORTED_SCHEMA_VERSION = max(SUPPORTED_SCHEMA_VERSIONS)  # 兼容旧引用
 
+_INSPECTION_CONDITION_COLUMNS = {
+    "frequency": "激励频率", "freq_unit": "频率单位", "gain": "增益",
+    "coil": "线圈", "plate": "铁板",
+}
+
 
 @dataclass
 class ReplayRow:
@@ -58,6 +63,8 @@ class ReplayRow:
     attenuation: List[Optional[float]]   # baseline - filtered（mV，可 None）
     drop_pct: List[Optional[float]]      # 检波电压下降比例（%，可 None）
     ch_status: List[int]    # ChannelStatus int
+    # 仅来自明确的 position_mm 列；无记录或非有限值为 None，不推算位置。
+    position_mm: Optional[float] = None
 
 
 class CsvSchemaError(Exception):
@@ -95,6 +102,8 @@ class ReplaySource(QObject):
         #: 文件内 ADC Profile 是否不一致（>1 种）
         self._profile_conflict: bool = False
         self._recorded_sources: set[str] = set()
+        self._inspection_conditions: dict = {}
+        self._inspection_conditions_conflict: bool = False
 
     # ------------------------------------------------------------------
     @property
@@ -155,6 +164,21 @@ class ReplaySource(QObject):
         return len(self._rows)
 
     @property
+    def inspection_rows(self) -> tuple[ReplayRow, ...]:
+        """已解析行的元组快照；供离线检测读取，不影响回放进度。"""
+        return tuple(self._rows)
+
+    @property
+    def inspection_conditions(self) -> dict:
+        """文件明确记录的检测条件副本；缺失/非法值不推断、不补默认值。"""
+        return dict(self._inspection_conditions)
+
+    @property
+    def inspection_conditions_conflict(self) -> bool:
+        """文件内至少一个检测条件出现两个不同的非空有效值。"""
+        return self._inspection_conditions_conflict
+
+    @property
     def current_index(self) -> int:
         return self._index
 
@@ -188,6 +212,8 @@ class ReplaySource(QObject):
         self._recorded_profile = ""
         self._profile_conflict = False
         self._recorded_sources.clear()
+        self._inspection_conditions.clear()
+        self._inspection_conditions_conflict = False
         self._csv_path = csv_path
         if was_active:
             self.state_changed.emit("stopped")
@@ -197,6 +223,12 @@ class ReplaySource(QObject):
             if header is None:
                 raise CsvSchemaError("CSV 为空")
             col_idx = {name: i for i, name in enumerate(header)}
+            # 位置是可选的显式标注，大小写/首尾空格不敏感；不接受时间、
+            # 帧号或其他单位的列作为位置，也不改变旧测量列的解析规则。
+            position_columns = {
+                "position_mm": i for i, name in enumerate(header)
+                if name.strip().lower() == "position_mm"
+            }
             sv_col = col_idx.get("schema_version")
             if sv_col is None:
                 raise CsvSchemaError("缺少 schema_version 列")
@@ -283,6 +315,18 @@ class ReplaySource(QObject):
                     source = row[source_col].strip().lower()
                     if source in ("serial", "tcp", "demo"):
                         self._recorded_sources.add(source)
+
+                for name, column in _INSPECTION_CONDITION_COLUMNS.items():
+                    index = col_idx.get(column)
+                    if index is None:
+                        continue
+                    value = self._normalize_inspection_condition(name, row[index])
+                    if value is None:
+                        continue
+                    if name not in self._inspection_conditions:
+                        self._inspection_conditions[name] = value
+                    elif self._inspection_conditions[name] != value:
+                        self._inspection_conditions_conflict = True
 
                 sv = self._schema_version
                 try:
@@ -376,12 +420,33 @@ class ReplaySource(QObject):
                     percent_signed=percent_signed,
                     attenuation=attenuation, drop_pct=drop_pct,
                     ch_status=ch_status,
+                    position_mm=self._finite_position(row, position_columns),
                 ))
             # 布局一致性：同一 CSV 只应有一种 channel_map
             self._layout_variant_count = len(layout_variants)
 
         if not self._rows:
             raise CsvSchemaError("CSV 中没有有效行")
+
+    @staticmethod
+    def _normalize_inspection_condition(name, text):
+        value = text.strip()
+        if not value:
+            return None
+        if name == "frequency":
+            try:
+                number = float(value)
+            except ValueError:
+                return None
+            return number if math.isfinite(number) and number >= 0 else None
+        if name == "freq_unit":
+            return {"hz": "Hz", "khz": "kHz", "mhz": "MHz", "ghz": "GHz"}.get(value.lower(), value)
+        return value
+
+    @staticmethod
+    def _finite_position(row, position_columns) -> Optional[float]:
+        value = ReplaySource._opt_float(row, position_columns, "position_mm")
+        return value if value is not None and math.isfinite(value) else None
 
     @staticmethod
     def _int_or(row, col_idx, name, default):

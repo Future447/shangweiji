@@ -11,7 +11,7 @@ UI 要点：
   不取绝对值、不截零、不翻转）
 - 次级详情：无钢板基线（历史标定参数，当前帧无效时仍显示）、
   当前检波电压（滤波）、串口采样（ADS1115 输入端）、
-  VOUT 估算（AD8362 输出端 = 采样 × 分压比）、旧 Δ（诊断）、更新时间
+  VOUT 估算（检波器输出 = 采样 × 分压比）、更新时间
 - 当前帧无效/饱和/断流时，当前测量与派生值显示"—"，不留残留值
 - 没有真实数据时显示"—"，不显示看似真实的 0
 """
@@ -193,6 +193,7 @@ class ChannelPanel(QWidget):
         primary.addWidget(att_box, 1)
         primary.addWidget(pct_box)
         layout.addLayout(primary)
+        self._legacy_metrics = (att_box, pct_box)
 
         # 紧凑指标 3×2 网格（两行三列，更适合右栏窄宽）
         grid = QGridLayout()
@@ -212,14 +213,9 @@ class ChannelPanel(QWidget):
                     "未经滤波、未乘分压比",
         )
         self._m_vout = _VerticalMetric(
-            "VOUT(分压后) mV",
+            "检波器 VOUT 估算 mV",
             tooltip="检波器 VOUT 估计值（mV）= ADC 原始 mV × 分压比；"
-                    "物理节点：AD8362 输出端。与上面的 ADC 原始值不是同一个量",
-        )
-        self._m_delta = _VerticalMetric(
-            "旧Δ(诊断) mV",
-            tooltip="旧语义 Δ = 滤波 − 基线（诊断量，与衰减量符号相反；"
-                    "仅 invert_sign 影响它）",
+                    "物理节点为检波器输出端。",
         )
         self._m_age = _VerticalMetric(
             "更新", tooltip="最后更新时间"
@@ -241,8 +237,7 @@ class ChannelPanel(QWidget):
         grid.addWidget(self._m_filtered, 0, 1)
         grid.addWidget(self._m_raw, 0, 2)
         grid.addWidget(self._m_vout, 1, 0)
-        grid.addWidget(self._m_delta, 1, 1)
-        grid.addWidget(self._m_age, 1, 2)
+        grid.addWidget(self._m_age, 1, 1, 1, 2)
         grid.addWidget(self._m_scan, 2, 0)
         grid.addWidget(self._m_index, 2, 1)
         grid.addWidget(self._m_valid, 2, 2)
@@ -251,6 +246,11 @@ class ChannelPanel(QWidget):
         grid.setColumnStretch(2, 1)
         layout.addLayout(grid)
         self.setLayout(layout)
+
+    def set_legacy_experiment(self, enabled: bool) -> None:
+        self._show_legacy_experiment = bool(enabled)
+        for widget in (*self._legacy_metrics, self._m_baseline):
+            widget.setVisible(enabled)
 
     def set_profile(self, profile: AdcProfile) -> None:
         self._profile = profile
@@ -293,10 +293,13 @@ class ChannelPanel(QWidget):
         if binding_label:
             self._lbl_binding.setText(f"绑定：{binding_label}")
         self._lbl_position.setText(self._position or "—")
-        self._badge.set_status(
-            _STATUS_TEXT.get(snapshot.status, "—"),
-            _STATUS_ROLE.get(snapshot.status, "neutral"),
-        )
+        status = snapshot.status
+        if not getattr(self, "_show_legacy_experiment", True) and valid_bit == 1 and status in (
+            ChannelStatus.NOT_CALIBRATED, ChannelStatus.WARMING_UP,
+        ):
+            self._badge.set_status("采样正常", "ok")
+        else:
+            self._badge.set_status(_STATUS_TEXT.get(status, "—"), _STATUS_ROLE.get(status, "neutral"))
         self._m_index.set_value(
             f"第 {channel + 1} 个（idx {channel}）"
         )
@@ -372,11 +375,6 @@ class ChannelPanel(QWidget):
         self._m_vout.set_value(
             f"{snap.detector_vout_mv:.3f}"
             if snap.detector_vout_mv is not None
-            else "—"
-        )
-        self._m_delta.set_value(
-            _signed(snap.delta_legacy_mv)
-            if snap.delta_legacy_mv is not None
             else "—"
         )
         if last_update_monotonic is not None:

@@ -22,16 +22,19 @@ UI 重构要点（来自 UI_DESIGN_ADVICE_AND_CLAUDE_PROMPT.md）：
 - 默认 1360×840 窗口
 - 顶部状态条：全局状态、FPS、帧、丢帧
 - 操作带：端口 + 连接 + 演示 + 记录
-- 65:35 水平分割：左 4×4 热力图，右上下分（通道详情 + 曲线）
+- 4×4 热力图优先，辅助面板按需展开
 - QDockWidget 容纳"日志 / 原始数据"，默认折叠
 - 全部用主题令牌和 QStyle.standardIcon
 """
 
 from __future__ import annotations
 
+import math
 import os
 import time
 import uuid
+
+import numpy as np
 from collections import deque
 from enum import IntEnum
 from typing import Dict, List, Optional
@@ -40,6 +43,7 @@ from PyQt5.QtCore import QSize, Qt, QTimer
 from PyQt5.QtGui import QFont, QKeySequence
 from PyQt5.QtWidgets import (
     QAction,
+    QButtonGroup,
     QCheckBox,
     QComboBox,
     QDockWidget,
@@ -52,13 +56,14 @@ from PyQt5.QtWidgets import (
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
+    QScrollArea,
     QSizePolicy,
     QSpinBox,
     QSplitter,
+    QStackedWidget,
     QStatusBar,
     QStyle,
     QTabWidget,
-    QToolBar,
     QVBoxLayout,
     QWidget,
 )
@@ -106,8 +111,11 @@ from models.channel_state import ChannelStatus
 from models.frame import DFrame, EFrame, MAX_CHANNEL_COUNT, MV_MAX, MV_MIN
 from ui.array_analysis_dialog import ArrayAnalysisDialog
 from ui.channel_panel import ChannelPanel
+from ui.compensation_panel import CompensationPanel
 from ui.components import ElidingLabel, SectionHeader, StatusBadge, SurfaceCard
 from ui.heatmap_widget import HeatmapLegend, HeatmapWidget
+from ui.inspection_controller import InspectionController, MODE_NAMES, reference_context, replay_context, usable_samples
+from ui.inspection_panel import InspectionPanel
 from ui.plot_widget import PlotWidget
 from ui.replay_controls import ReplayControls
 from ui.settings_dialog import SettingsDialog
@@ -143,7 +151,6 @@ SCAN_GAP_LOG_LIMIT = 20
 REFRESH_INTERVAL_MS = 80
 HEATMAP_RANGE_HOLD_S = 1.5
 FPS_WINDOW_S = 10.0
-COMPACT_LAYOUT_THRESHOLD = 1200
 
 
 # ---------------------------------------------------------------------
@@ -265,6 +272,11 @@ class MainWindow(QMainWindow):
         self._array_analysis: Optional[ArrayAnalysisDialog] = None
         self._array_last_live_scan: Optional[int] = None
         self._array_replay_revision = 0
+        self._task_mode = "compensation"
+        self._workspace_tool = None
+        self._latest_workflow_packet = None
+        self._latest_compensated = None
+        self._last_replay_task_row = None
         # 回放临时映射：当前热力图是否正按"记录时布局"显示。
         # 只改显示位置，绝不写入实时配置；退出回放时恢复当前硬件布局。
         self._replay_using_recorded_map: bool = False
@@ -336,7 +348,6 @@ class MainWindow(QMainWindow):
 
         # --- UI ---
         self._build_ui()
-        self._build_toolbar()
         self._build_dock()
 
         # --- 定时器 ---
@@ -389,101 +400,132 @@ class MainWindow(QMainWindow):
     # UI 构建
     # ==================================================================
     def _build_ui(self) -> None:
-        """构建主区域：命令栏 + 全局状态栏 + 消息栏 + 操作带 + 65:35 水平分割。"""
         central = QWidget()
-        cv = QVBoxLayout()
-        cv.setContentsMargins(10, 8, 10, 8)
-        cv.setSpacing(6)
+        layout = QVBoxLayout(central)
+        layout.setContentsMargins(10, 8, 10, 8)
+        layout.setSpacing(6)
 
         self._command_bar = self._build_command_bar()
-        cv.addWidget(self._command_bar)
-
+        layout.addWidget(self._command_bar)
+        self._command_bar.hide()
         self._global_status_bar = self._build_global_status_bar()
-        cv.addWidget(self._global_status_bar)
-
+        layout.addWidget(self._global_status_bar)
         self._message_bar = MessageBar()
-        cv.addWidget(self._message_bar)
-
+        layout.addWidget(self._message_bar)
+        layout.addWidget(self._build_task_bar())
         self._op_bar_full = self._build_operation_bar()
-        cv.addWidget(self._op_bar_full)
         self._op_bar_inline = self._build_operation_bar_compact()
-        cv.addWidget(self._op_bar_inline)
-        self._op_bar_inline.setVisible(False)
+        layout.addWidget(self._op_bar_inline)
+        layout.addWidget(self._op_bar_full)
+        layout.addWidget(self._build_replay_bar())
 
-        splitter = QSplitter(Qt.Horizontal)
-        splitter.setChildrenCollapsible(False)
-        splitter.setHandleWidth(6)
-        left = self._build_left_panel()
-        left.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        left.setMinimumWidth(360)
-        right = self._build_right_panel()
-        right.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        right.setMinimumWidth(METRICS.right_min_w)
-        splitter.addWidget(left)
-        splitter.addWidget(right)
-        splitter.setStretchFactor(0, 65)
-        splitter.setStretchFactor(1, 35)
-        splitter.setSizes([
-            int(METRICS.window_default_w * METRICS.left_ratio),
-            int(METRICS.window_default_w * (1 - METRICS.left_ratio)),
-        ])
-        cv.addWidget(splitter, 1)
-        self._splitter = splitter
-
-        central.setLayout(cv)
+        self._splitter = QSplitter(Qt.Horizontal)
+        self._splitter.setChildrenCollapsible(False)
+        self._splitter.setHandleWidth(6)
+        self._heatmap_workspace = self._build_left_panel()
+        self._heatmap_workspace.setMinimumWidth(320)
+        self._splitter.addWidget(self._heatmap_workspace)
+        self._splitter.addWidget(self._build_workspace())
+        self._splitter.setStretchFactor(0, 3)
+        self._splitter.setStretchFactor(1, 2)
+        layout.addWidget(self._splitter, 1)
+        self._update_compact_mode()
         self.setCentralWidget(central)
 
         self.setStatusBar(QStatusBar())
         self.statusBar().showMessage("就绪")
-
-        # 首次布局后再强制一次比例（setSizes 必须在实际尺寸确定后调用）
-        QTimer.singleShot(0, self._enforce_splitter_ratio)
-
-    def resizeEvent(self, event) -> None:  # noqa: N802
-        super().resizeEvent(event)
-        self._update_compact_mode()
-        self._enforce_splitter_ratio()
-
-    def _enforce_splitter_ratio(self) -> None:
-        if not hasattr(self, "_splitter"):
-            return
-        w = self._splitter.width()
-        if w <= 0:
-            return
-        handle = self._splitter.handleWidth() or 0
-        usable = max(1, w - handle)
-        right_min = METRICS.right_min_w
-        left_min = 360
-        target_left = int(round(usable * METRICS.left_ratio))
-        target_right = usable - target_left
-        if target_left < left_min:
-            target_left = left_min
-            target_right = max(right_min, usable - target_left)
-        if target_right < right_min:
-            target_right = right_min
-            target_left = max(left_min, usable - target_right)
-        new_sizes = [target_left, target_right]
-        cur = self._splitter.sizes()
-        if (
-            len(cur) >= 2
-            and abs(cur[0] - new_sizes[0]) <= 2
-            and abs(cur[1] - new_sizes[1]) <= 2
-        ):
-            return
-        self._splitter.setSizes(new_sizes)
+        self._set_workspace_tool(None)
 
     def _update_compact_mode(self) -> None:
-        compact = self.width() < COMPACT_LAYOUT_THRESHOLD
-        if not hasattr(self, "_command_bar"):
+        if not hasattr(self, "_replay_controls"):
             return
-        if compact:
-            self._command_bar.setVisible(False)
-            self._op_bar_full.setVisible(False)
-            self._op_bar_inline.setVisible(True)
-        else:
-            self._command_bar.setVisible(True)
-            self._op_bar_full.setVisible(True)
-            self._op_bar_inline.setVisible(False)
+        replay = self._app_mode == "replay"
+        self._op_bar_full.setVisible(not replay and self._btn_connection_details.isChecked())
+        self._op_bar_inline.setVisible(not replay)
+        self._replay_controls.setVisible(replay)
+
+    def _build_workspace(self) -> QWidget:
+        workspace = QWidget()
+        workspace.setMinimumWidth(300)
+        layout = QVBoxLayout(workspace)
+        layout.setContentsMargins(2, 0, 0, 0)
+        layout.setSpacing(6)
+        toolbar = QHBoxLayout()
+        self._workspace_title = QLabel()
+        self._workspace_title.setObjectName("AppName")
+        toolbar.addWidget(self._workspace_title, 1)
+        self._btn_expand_workspace = QPushButton("放大")
+        self._btn_expand_workspace.setProperty("role", "secondary")
+        self._btn_expand_workspace.setCheckable(True)
+        self._btn_expand_workspace.toggled.connect(self._expand_workspace)
+        toolbar.addWidget(self._btn_expand_workspace)
+        close = QPushButton("收起")
+        close.setProperty("role", "ghost")
+        close.clicked.connect(lambda: self._set_workspace_tool(None))
+        toolbar.addWidget(close)
+        layout.addLayout(toolbar)
+
+        self._workspace_stack = QStackedWidget()
+        self._workspace_stack.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Expanding)
+        layout.addWidget(self._workspace_stack, 1)
+
+        board = QWidget()
+        board_layout = QVBoxLayout(board)
+        board_layout.setContentsMargins(0, 0, 0, 0)
+        board_layout.addWidget(self._btn_plate, 0, Qt.AlignLeft)
+        self._btn_plate.hide()
+        board_layout.addWidget(self._legacy_calib_card)
+        board_layout.addWidget(self._board_controls, 1)
+
+        detail = self._build_right_panel()
+        self._channel_panel.set_legacy_experiment(False)
+        self._plot.set_legacy_experiment(False)
+        self._compensation = CompensationPanel()
+        self._compensation.profile_changed.connect(self._on_compensation_changed)
+        self._inspection_panel = InspectionPanel()
+        self._inspection = InspectionController(
+            self._inspection_panel, self, self._show_inspection_grid, require_compensation=True,
+        )
+        self._workspace_pages = {}
+        for name, widget in (
+            ("compensation", self._compensation), ("inspection", self._inspection_panel),
+            ("plate", board), ("channels", detail),
+        ):
+            if name == "plate":
+                page = widget
+            else:
+                page = QScrollArea()
+                page.setFrameShape(QFrame.NoFrame)
+                page.setWidgetResizable(True)
+                page.setWidget(widget)
+            self._workspace_pages[name] = page
+            self._workspace_stack.addWidget(page)
+        self._workspace = workspace
+        return workspace
+
+    def _set_workspace_tool(self, tool) -> None:
+        self._workspace_tool = tool
+        self._btn_expand_workspace.setChecked(False)
+        self._workspace.setVisible(tool is not None)
+        self._heatmap_workspace.show()
+        self._btn_channels.setChecked(tool == "channels")
+        if tool is not None:
+            titles = {
+                "compensation": "第 1 步 · 公共补偿", "inspection": "第 2 步 · 检测",
+                "plate": "板边覆盖实验", "channels": "通道详情和曲线",
+            }
+            self._workspace_title.setText(titles[tool])
+            self._workspace_stack.setCurrentWidget(self._workspace_pages[tool])
+            self._splitter.setSizes([54, 46])
+
+    def _expand_workspace(self, expanded: bool) -> None:
+        self._heatmap_workspace.setVisible(not expanded)
+        self._btn_expand_workspace.setText("并排查看" if expanded else "放大")
+        if not expanded:
+            self._splitter.setSizes([54, 46])
+
+    def _toggle_workspace_tool(self, tool) -> None:
+        self._set_workspace_tool(None if self._workspace_tool == tool else tool)
 
     def _build_status_bar_strip(self) -> QWidget:
         """已迁移到 _build_global_status_bar；保留以避免破坏外部调用。"""
@@ -514,8 +556,11 @@ class MainWindow(QMainWindow):
         self._btn_mode_replay.setCheckable(True)
         self._btn_mode_replay.setProperty("role", "secondary")
         self._btn_mode_replay.setMaximumWidth(80)
-        self._btn_mode_live.toggled.connect(self._on_mode_live_toggled)
-        self._btn_mode_replay.toggled.connect(self._on_mode_replay_toggled)
+        self._source_buttons = QButtonGroup(bar)
+        self._source_buttons.addButton(self._btn_mode_live)
+        self._source_buttons.addButton(self._btn_mode_replay)
+        self._btn_mode_live.clicked.connect(lambda: self._select_data_source("live"))
+        self._btn_mode_replay.clicked.connect(lambda: self._select_data_source("replay"))
         mode_holder = QFrame()
         mode_holder.setObjectName("ModeGroup")
         mg = QHBoxLayout(mode_holder)
@@ -523,28 +568,20 @@ class MainWindow(QMainWindow):
         mg.setSpacing(0)
         mg.addWidget(self._btn_mode_live)
         mg.addWidget(self._btn_mode_replay)
-        h.addWidget(mode_holder)
+        self._source_mode_group = mode_holder
 
         h.addSpacing(8)
-        self._lbl_profile_tb = QLabel(
+        self._lbl_profile_tb = ElidingLabel(
             f"Profile: {self._config.adc_profile.display_name}"
         )
         self._lbl_profile_tb.setObjectName("Caption")
-        h.addWidget(self._lbl_profile_tb)
         h.addStretch(1)
-
-        self._btn_array_analysis = QPushButton("覆盖分析")
-        self._btn_array_analysis.setObjectName("arrayAnalysisButton")
-        self._btn_array_analysis.setProperty("role", "secondary")
-        self._btn_array_analysis.clicked.connect(self._on_array_analysis_clicked)
-        h.addWidget(self._btn_array_analysis)
 
         self._btn_settings = QPushButton()
         self._btn_settings.setIcon(style.standardIcon(QStyle.SP_FileDialogDetailedView))
         self._btn_settings.setText("设置")
         self._btn_settings.setProperty("role", "ghost")
         self._btn_settings.clicked.connect(self._on_open_settings)
-        h.addWidget(self._btn_settings)
 
         self._btn_diag = QPushButton()
         self._btn_diag.setIcon(style.standardIcon(QStyle.SP_MessageBoxInformation))
@@ -552,34 +589,246 @@ class MainWindow(QMainWindow):
         self._btn_diag.setCheckable(True)
         self._btn_diag.setProperty("role", "ghost")
         self._btn_diag.toggled.connect(self._on_toggle_diagnostics)
-        h.addWidget(self._btn_diag)
-
-        self._btn_about = QPushButton()
-        self._btn_about.setIcon(style.standardIcon(QStyle.SP_DialogHelpButton))
-        self._btn_about.setText("关于")
-        self._btn_about.setProperty("role", "ghost")
-        self._btn_about.clicked.connect(self._on_about)
-        h.addWidget(self._btn_about)
-
         bar.setLayout(h)
         return bar
 
+    def _build_task_bar(self) -> QWidget:
+        bar = QFrame()
+        bar.setObjectName("InspectionModeBar")
+        row = QHBoxLayout(bar)
+        row.setContentsMargins(2, 0, 2, 0)
+        self._task_buttons = QButtonGroup(bar)
+        self._task_button_by_mode = {}
+        tasks = {"compensation": "1  公共补偿", "fatigue": "2  疲劳裂纹",
+                 "weld": "2  焊缝检测", "plate": "板边实验"}
+        for mode, label in tasks.items():
+            button = QPushButton(label)
+            button.setObjectName(f"inspectionMode_{mode}")
+            button.setCheckable(True)
+            button.setChecked(mode == self._task_mode)
+            button.setProperty("role", "secondary")
+            button.clicked.connect(lambda _checked, mode=mode: self._select_task(mode))
+            self._task_buttons.addButton(button)
+            self._task_button_by_mode[mode] = button
+            row.addWidget(button)
+        self._btn_channels = QPushButton("通道 / 曲线")
+        self._btn_channels.setProperty("role", "ghost")
+        self._btn_channels.setCheckable(True)
+        self._btn_channels.clicked.connect(lambda: self._toggle_workspace_tool("channels"))
+        row.addWidget(self._btn_channels)
+        row.addStretch(1)
+        row.addWidget(self._source_mode_group)
+        row.addWidget(self._btn_settings)
+        row.addWidget(self._btn_diag)
+        return bar
+
+    def _select_task(self, mode: str) -> None:
+        if mode != "compensation" and self._compensation.is_capturing:
+            self._task_button_by_mode[self._task_mode].setChecked(True)
+            self._set_workspace_tool("compensation")
+            self.statusBar().showMessage("请等待公共补偿采集完成，或先取消采集。", 6000)
+            return
+        if mode == "plate":
+            self._on_array_analysis_clicked()
+            return
+        tool = "compensation" if mode == "compensation" else "inspection"
+        self._sync_common_context()
+        if mode in MODE_NAMES and self._compensation.active_profile is None:
+            if self._task_mode == "plate":
+                self._select_task("compensation")
+            else:
+                self._task_button_by_mode[self._task_mode].setChecked(True)
+                self._set_workspace_tool("compensation")
+            self.statusBar().showMessage("请先完成或加载当前工况的公共补偿标定。", 8000)
+            return
+        if mode == self._task_mode:
+            self._toggle_workspace_tool(tool)
+            return
+        self._task_mode = mode
+        self._task_button_by_mode[mode].setChecked(True)
+        if self._array_analysis is not None:
+            self._array_analysis.set_workspace_active(False)
+            self._array_analysis.clear_frame()
+        if self._calib.is_running():
+            self._calib.cancel()
+        self._board_controls.hide()
+        self._legacy_calib_card.hide()
+        self._legacy_range_controls.hide()
+        self._lbl_array_coverage_status.hide()
+        self._channel_panel.set_legacy_experiment(False)
+        self._plot.set_legacy_experiment(False)
+        self._btn_plate.hide()
+        self._set_workspace_tool(tool)
+        self._before_compensation.setVisible(mode == "compensation")
+        self._workflow_status.show()
+        self._inspection.reset_stream()
+        if mode in MODE_NAMES:
+            self._inspection.set_mode(mode)
+        self._sync_inspection_context()
+        self._render_compensation_grid()
+        if mode in MODE_NAMES and self._latest_workflow_packet is not None:
+            self._inspection.on_frame(*self._latest_workflow_packet)
+
+    def _sync_active_task_context(self) -> None:
+        if self._task_mode == "plate":
+            self._sync_array_analysis_context()
+        self._sync_inspection_context()
+
+    def _workflow_context(self):
+        live = self._app_mode == "live" and self._source_state in (SourceState.SERIAL_CONNECTED, SourceState.DEMO)
+        if live:
+            conditions = self._baseline_conditions()
+            profile = conditions.pop("adc_profile")
+            if not conditions["frequency"]:
+                conditions.pop("frequency")
+            unit = conditions["freq_unit"]
+            conditions["freq_unit"] = {"hz": "Hz", "khz": "kHz", "mhz": "MHz", "ghz": "GHz"}.get(unit.lower(), unit)
+            conditions["plate"] = str(self._config.experiment_params.get("plate") or "")
+            conditions["enabled_channels"] = sorted(self._processor.enabled_channels)
+            context = reference_context(
+                self._heatmap.channel_map(), self._session_source_name(), profile,
+                conditions, self._current_device_id or "",
+            )
+            return context, True
+        if self._app_mode == "replay":
+            return replay_context(self._replay), False
+        return None, False
+
+    def _sync_common_context(self):
+        context, live = self._workflow_context()
+        previous = self._compensation.active_profile
+        self._compensation.set_context(context, can_capture=live)
+        active = self._compensation.active_profile
+        if previous is not active:
+            self._latest_workflow_packet = None
+            self._latest_compensated = None
+            if self._task_mode != "plate":
+                self._render_compensation_grid()
+        return context, live
+
+    def _sync_inspection_context(self):
+        context, live = self._sync_common_context()
+        if self._task_mode not in MODE_NAMES:
+            return None
+        self._inspection.set_context(
+            context, can_capture=live, compensation=self._compensation.active_profile,
+        )
+        return self._inspection
+
+    def _on_compensation_changed(self):
+        self._latest_compensated = None
+        if self._before_compensation.isChecked():
+            self._before_compensation.blockSignals(True)
+            self._before_compensation.setChecked(False)
+            self._before_compensation.blockSignals(False)
+        self._sync_inspection_context()
+        if self._latest_workflow_packet is not None:
+            packet = self._latest_workflow_packet
+            self._latest_workflow_packet = None
+            self._dispatch_workflow_frame(*packet, collect=False)
+        else:
+            self._render_compensation_grid()
+
+    def _dispatch_workflow_frame(self, time_s, raw, position_mm=None, *, collect=True):
+        inspection = self._sync_inspection_context()
+        if collect:
+            self._compensation.on_frame(raw)
+        active = self._compensation.active_profile
+        self._latest_workflow_packet = (time_s, raw, position_mm)
+        self._latest_compensated = active.apply(raw) if active is not None else None
+        if inspection is not None:
+            inspection.on_frame(time_s, raw, position_mm)
+        elif self._task_mode == "compensation":
+            self._render_compensation_grid()
+
+    def _render_compensation_grid(self, residual=None):
+        if self._task_mode == "plate":
+            return
+        profile = self._compensation.active_profile
+        if profile is None:
+            self._write_workflow_grid(None, "compensated", "等待第 1 步公共补偿标定",
+                                      "连接设备后采集完好参考，或加载同工况标定。")
+            return
+
+        caption = "公共补偿后响应（相对完好参考，mV）"
+        status = ("耦合修正已启用" if profile.correction_mode == "coupling"
+                  else f"公共补偿已启用 · 耦合标定 {profile.template_count}/16 格")
+        values = self._latest_compensated
+        display = "compensated"
+        if self._task_mode == "compensation" and self._before_compensation.isChecked():
+            raw = self._latest_workflow_packet[1] if self._latest_workflow_packet is not None else None
+            values = raw - profile.baseline if raw is not None and np.isfinite(raw).all() else None
+            display = "before_compensation"
+            caption = "补偿前响应（相对同一完好参考，mV）"
+        if values is None:
+            status += " · 等待新数据"
+        elif not np.isfinite(values).any():
+            status += " · 本帧需要完整 16 路"
+        assessment = self._task_mode in MODE_NAMES
+        if assessment:
+            if residual is not None:
+                values, display = residual, "residual"
+                caption = "补偿后良品残差（当前 − 良品，mV）"
+            status = f"{status} · {self._inspection_panel.indicator.text()}"
+        self._write_workflow_grid(values, display, caption, status)
+
+    def _show_inspection_grid(self, residual):
+        if self._task_mode in MODE_NAMES:
+            self._render_compensation_grid(residual)
+
+    def _write_workflow_grid(self, values, display, caption, status):
+        self._heatmap.set_display_mode(display)
+        self._legend.set_display_mode(display)
+        self._heatmap_header.set_caption(caption)
+        if self._workflow_status.text() != status:
+            self._workflow_status.setText(status)
+        grid = None
+        if values is not None:
+            grid = [[None] * 4 for _ in range(4)]
+            for channel, (row, col) in self._heatmap.channel_map().items():
+                grid[row][col] = float(values[channel])
+        if self._task_mode == "compensation" and self._latest_workflow_packet is not None:
+            profile = self._compensation.active_profile
+            if profile is not None:
+                raw = self._latest_workflow_packet[1]
+                if np.isfinite(raw).all():
+                    # Same color scale for the before/after comparison.
+                    values = np.r_[raw - profile.baseline, self._latest_compensated]
+        peak = max((abs(v) for v in values if math.isfinite(v)), default=0.0) if values is not None else 0.0
+        scale = max(0.125, float(peak))
+        self._heatmap.set_range(scale)
+        self._legend.set_range(scale)
+        self._heatmap.set_corrected_values(grid)
+
     def _on_array_analysis_clicked(self) -> None:
+        if self._task_mode == "plate":
+            self._toggle_workspace_tool("plate")
+            return
+        self._task_mode = "plate"
+        self._inspection.reset_stream()
+        self._before_compensation.hide()
+        self._workflow_status.hide()
+        self._set_workspace_tool("plate")
+        self._task_button_by_mode["plate"].setChecked(True)
         if self._array_analysis is None:
-            self._array_analysis = ArrayAnalysisDialog(self)
+            self._array_analysis = ArrayAnalysisDialog(self._board_controls, embedded=True)
+            self._board_controls.setWidget(self._array_analysis)
             self._array_analysis.display_result_changed.connect(self._show_array_coverage)
             self._array_analysis.calibration_applied.connect(self._on_array_calibration_applied)
-        was_visible = self._array_analysis.isVisible()
-        self._array_analysis.show()
-        self._array_analysis.raise_()
-        self._array_analysis.activateWindow()
+        self._legacy_range_controls.show()
+        self._btn_plate.setVisible(self._source_state == SourceState.DEMO)
+        self._on_array_heatmap_mode_changed(self._array_heatmap_mode.currentIndex())
         dialog = self._sync_array_analysis_context()
-        if (
+        if self._last_replay_task_row is not None and self._app_mode == "replay":
+            self._show_replay_task_frame(self._last_replay_task_row)
+            if self._replay is not None and self._replay.state in ("paused", "ended"):
+                self._array_analysis.hold_frame()
+        elif (
             dialog is not None
-            and not was_visible
             and self._app_mode == "live"
             and self._source_state in (SourceState.SERIAL_CONNECTED, SourceState.DEMO)
             and self._last_dframe is not None
+            and self._last_dframe.scan_number == self._array_last_live_scan
             and self._segment_last_dframe_time > 0
             and time.monotonic() - self._segment_last_dframe_time <= DATA_TIMEOUT_S
         ):
@@ -597,15 +846,19 @@ class MainWindow(QMainWindow):
             if replay is None or not replay.total_rows:
                 dialog.set_context(None, channel_map, "请先打开回放 CSV。")
                 return None
-            if replay.layout_conflict or replay.profile_conflict or replay.source_conflict:
-                dialog.set_context(None, channel_map, "回放混用了布局、ADC 配置或数据来源。请选用同一测量条件的记录。")
+            if (replay.layout_conflict or replay.profile_conflict or replay.source_conflict
+                    or replay.inspection_conditions_conflict):
+                dialog.set_context(None, channel_map, "记录混用了采集条件，请选用同一工况的 CSV。")
                 return None
-            conditions = (
-                ("adc_profile", replay.recorded_profile_name),
-                ("recorded_source_scope", replay.recorded_source_scope),
-                ("load_revision", self._array_replay_revision),
+            conditions = replay.inspection_conditions
+            if not conditions.get("frequency"):
+                conditions.pop("frequency", None)
+            conditions.update(
+                adc_profile=replay.recorded_profile_name,
+                recorded_source_scope=replay.recorded_source_scope,
+                load_revision=self._array_replay_revision,
             )
-            key = ("replay", replay.csv_path, conditions)
+            key = ("replay", replay.csv_path, tuple(sorted(conditions.items())))
             description = "CSV 回放 · ADC 原始毫伏值"
             if replay.recorded_source_scope == SCOPE_DEMO:
                 description += " · 演示记录"
@@ -631,6 +884,8 @@ class MainWindow(QMainWindow):
         return dialog
 
     def _send_array_analysis_frame(self, values, status: int, valid_mask: int) -> None:
+        if self._task_mode != "plate":
+            return
         dialog = self._sync_array_analysis_context()
         if dialog is None:
             return
@@ -644,80 +899,104 @@ class MainWindow(QMainWindow):
 
     def _clear_array_analysis_frame(self) -> None:
         self._array_last_live_scan = None
+        self._last_replay_task_row = None
+        self._latest_workflow_packet = None
+        self._latest_compensated = None
+        if hasattr(self, "_compensation"):
+            self._compensation.reset_stream()
         if self._array_analysis is not None:
             self._array_analysis.clear_frame()
+        if hasattr(self, "_inspection"):
+            self._inspection.reset_stream()
+            self._render_compensation_grid()
 
     def _on_array_calibration_applied(self) -> None:
-        self._array_heatmap_mode.setCurrentIndex(self._array_heatmap_mode.findData("coverage"))
+        if self._task_mode == "plate":
+            self._array_heatmap_mode.setCurrentIndex(self._array_heatmap_mode.findData("coverage"))
 
     def _on_array_heatmap_mode_changed(self, _index: int) -> None:
+        if self._task_mode != "plate":
+            return
         mode = self._array_heatmap_mode.currentData()
+        independent = mode == "attenuation"
+        self._board_controls.setVisible(not independent)
+        self._legacy_calib_card.setVisible(independent)
+        self._channel_panel.set_legacy_experiment(independent)
+        self._plot.set_legacy_experiment(independent)
+        self._array_analysis.set_workspace_active(not independent)
         self._heatmap.set_display_mode(mode)
         self._legend.set_display_mode(mode)
         captions = {
             "coverage": "直板边几何覆盖率估计（%）",
-            "corrected": "扣除未覆盖参考格的公共响应（mV）",
-            "attenuation": "相对无钢板基线的衰减量（mV）；正值：信号下降；负值：信号升高",
+            "corrected": "空场衰减扣除公共响应（mV）",
+            "board_raw": "板边标定空场 − 当前采样（mV）",
+            "attenuation": "独立无钢板基线 − 当前滤波（mV）",
         }
         self._heatmap_header.set_caption(captions[mode])
         for control in (self._lbl_range, self._chk_auto, self._lbl_manual_range, self._sp_range):
             control.setVisible(mode != "coverage")
-        self._lbl_array_coverage_status.setVisible(mode != "attenuation")
-        if mode != "attenuation":
-            if self._array_analysis is not None:
-                self._sync_array_analysis_context()
-                snapshot = self._array_analysis.coverage_snapshot()
-            else:
-                snapshot = {"status": "从顶部「覆盖分析」加载标定，或采集空场和位置模板。"}
-            self._show_array_coverage(snapshot)
+        self._lbl_array_coverage_status.setVisible(not independent)
+        self._apply_range_to_ui()
+        if independent:
+            self._array_analysis.clear_frame()
+        else:
+            if self._calib.is_running():
+                self._calib.cancel()
+            self._sync_array_analysis_context()
+            self._show_array_coverage(self._array_analysis.coverage_snapshot())
 
     def _show_array_coverage(self, snapshot: dict) -> None:
+        if self._task_mode != "plate":
+            return
         mode = self._array_heatmap_mode.currentData()
         if mode == "attenuation":
             return
-        # Pause/end may retain a known CSV row. Live disconnect or invalid data is unknown.
-        usable = (snapshot.get("fresh") or snapshot.get("state") == "held") and (
-            snapshot.get("channel_map") == self._heatmap.channel_map()
-        )
+        matching_map = snapshot.get("channel_map") == self._heatmap.channel_map()
+        usable = matching_map and (snapshot.get("fresh") or snapshot.get("state") == "held")
         status = snapshot.get("status") or "等待与标定匹配的完整 16 路数据。"
         if mode == "coverage":
             self._heatmap.set_coverage_values(snapshot.get("coverage") if usable else None)
+            self._lbl_array_coverage_status.hide()
+            return
+        if mode == "board_raw":
+            values = snapshot.get("attenuation") if matching_map else None
+            status = "使用当前板边标定的空场参考。" if values is not None else status
         else:
-            self._heatmap.set_corrected_values(snapshot.get("corrected") if usable else None)
+            values = snapshot.get("corrected") if usable else None
             if usable and snapshot.get("range") is not None:
                 common = snapshot.get("common_mv")
                 count = snapshot["reference_count"]
                 if common is None:
-                    status = f"仅 {count} 个明确未覆盖的参考格；公共补偿需要至少 4 个。{status}"
+                    status = f"只有 {count} 个明确未覆盖的参考格，公共补偿需要至少 4 个。"
                 else:
-                    status = f"已扣除公共响应 {common:+.2f} mV（{count} 个未覆盖参考格）。{status}"
+                    status = f"已扣除公共响应 {common:+.2f} mV，使用 {count} 个未覆盖参考格。"
+        self._heatmap.set_corrected_values(values)
+        if self._heatmap_auto and values is not None:
+            peak = max((abs(float(value)) for row in values for value in row
+                        if math.isfinite(value)), default=0.0)
+            scale = max(1.0, peak)
+            self._heatmap.set_range(scale)
+            self._legend.set_range(scale)
+            self._lbl_range.setText(f"色阶 ±{scale:.1f}")
+        self._lbl_array_coverage_status.show()
         if self._lbl_array_coverage_status.text() != status:
             self._lbl_array_coverage_status.setText(status)
             self._lbl_array_coverage_status.setToolTip(status)
 
-    def _on_mode_live_toggled(self, checked: bool) -> None:
-        if checked:
-            self._btn_mode_replay.blockSignals(True)
-            self._btn_mode_replay.setChecked(False)
-            self._btn_mode_replay.blockSignals(False)
-            self._set_app_mode("live")
-
-    def _on_mode_replay_toggled(self, checked: bool) -> None:
-        if checked:
-            if not self._confirm_switch_to_replay():
-                self._btn_mode_replay.blockSignals(True)
-                self._btn_mode_replay.setChecked(False)
-                self._btn_mode_replay.blockSignals(False)
-                return
-            self._btn_mode_live.blockSignals(True)
-            self._btn_mode_live.setChecked(False)
-            self._btn_mode_live.blockSignals(False)
-            self._set_app_mode("replay")
+    def _select_data_source(self, mode: str) -> None:
+        if mode == self._app_mode:
+            return
+        if mode == "replay" and not self._confirm_switch_to_replay():
+            self._btn_mode_live.setChecked(True)
+            return
+        self._set_app_mode(mode)
 
     def _set_app_mode(self, mode: str) -> None:
         self._clear_array_analysis_frame()
         self._app_mode = mode
         replay = mode == "replay"
+        (self._btn_mode_replay if replay else self._btn_mode_live).setChecked(True)
+        self._update_compact_mode()
         for attr in (
             "_btn_connect", "_btn_demo", "_btn_calib", "_btn_rec",
             "_btn_connect_inline", "_btn_demo_inline", "_btn_rec_inline",
@@ -725,8 +1004,6 @@ class MainWindow(QMainWindow):
             w = getattr(self, attr, None)
             if w is not None:
                 w.setEnabled(not replay)
-        if hasattr(self, "_replay_controls"):
-            self._replay_controls.setVisible(replay)
         if replay:
             self._stop_all_sources()
             if self._calib.is_running():
@@ -789,9 +1066,12 @@ class MainWindow(QMainWindow):
                 self._source_state
                 in (SourceState.SERIAL_CONNECTED, SourceState.DEMO)
             )
+        self._sync_active_task_context()
 
     def _confirm_switch_to_replay(self) -> bool:
-        if self._recorder.is_recording or self._calib.is_running():
+        board_capturing = self._array_analysis is not None and self._array_analysis.is_capturing()
+        if (self._recorder.is_recording or self._calib.is_running() or self._inspection.capture
+                or self._compensation.is_capturing or board_capturing):
             r = QMessageBox.question(
                 self, "切换到回放",
                 "当前正在记录或标定，切到回放会停止这些操作。继续？",
@@ -861,13 +1141,11 @@ class MainWindow(QMainWindow):
         h.setContentsMargins(8, 4, 8, 4)
         h.setSpacing(6)
 
-        self._lbl_app_inline = QLabel("涡流阵列 v3")
-        self._lbl_app_inline.setObjectName("AppName")
-        f = self._lbl_app_inline.font()
-        f.setBold(True)
-        self._lbl_app_inline.setFont(f)
-        h.addWidget(self._lbl_app_inline)
-
+        self._btn_connection_details = QPushButton("连接设置")
+        self._btn_connection_details.setCheckable(True)
+        self._btn_connection_details.setProperty("role", "ghost")
+        self._btn_connection_details.toggled.connect(self._update_compact_mode)
+        h.addWidget(self._btn_connection_details)
         self._cmb_port_inline = QComboBox()
         self._cmb_port_inline.setMinimumWidth(120)
         for dev, desc in list_serial_ports():
@@ -885,6 +1163,10 @@ class MainWindow(QMainWindow):
         self._btn_connect_inline.setMaximumWidth(72)
         self._btn_connect_inline.clicked.connect(self._on_connect_clicked)
         h.addWidget(self._btn_connect_inline)
+        self._btn_disconnect_inline = QPushButton("断开")
+        self._btn_disconnect_inline.setProperty("role", "secondary")
+        self._btn_disconnect_inline.clicked.connect(self._on_disconnect_clicked)
+        h.addWidget(self._btn_disconnect_inline)
 
         self._btn_demo_inline = QPushButton("演示")
         self._btn_demo_inline.setProperty("role", "secondary")
@@ -898,6 +1180,8 @@ class MainWindow(QMainWindow):
         self._btn_rec_inline.setMaximumWidth(72)
         self._btn_rec_inline.toggled.connect(self._on_rec_toggled)
         h.addWidget(self._btn_rec_inline)
+        self._lbl_profile_tb.setMaximumWidth(340)
+        h.addWidget(self._lbl_profile_tb, 1)
 
         bar.setLayout(h)
         return bar
@@ -945,6 +1229,9 @@ class MainWindow(QMainWindow):
                 self._lbl_rec_file.set_full_text(d)
 
     def _on_shortcut_cancel(self) -> None:
+        if self._compensation.is_capturing:
+            self._compensation.reset_stream()
+            return
         if self._calib.is_running():
             self._on_calib_cancel()
             return
@@ -979,6 +1266,9 @@ class MainWindow(QMainWindow):
             detected or self._config.cell_binding
         )
         self._heatmap.set_channel_map(norm, labels=labels)
+        if hasattr(self, "_inspection_panel"):
+            self._inspection_panel.set_channel_labels(labels)
+            self._compensation.set_channels(norm, labels)
         if hasattr(self, "_plot"):
             self._plot.set_channel_labels(labels)
         self._sync_selected_channel_position()
@@ -1042,9 +1332,12 @@ class MainWindow(QMainWindow):
         # 监听地址 = 本机绑定的网卡地址；设备地址由客户端连入时确定，
         # 两者严格区分，绝不把对端 IP 当作设备身份。
         self._tcp_group = QWidget()
-        tg = QHBoxLayout(self._tcp_group)
-        tg.setContentsMargins(0, 0, 0, 0)
+        tcp_layout = QVBoxLayout(self._tcp_group)
+        tcp_layout.setContentsMargins(0, 0, 0, 0)
+        tcp_layout.setSpacing(4)
+        tg = QHBoxLayout()
         tg.setSpacing(8)
+        tcp_layout.addLayout(tg)
         tg.addWidget(QLabel("监听地址:"))
         self._edt_listen_host = QLineEdit(self._config.tcp_listen_host)
         self._edt_listen_host.setMinimumWidth(110)
@@ -1062,6 +1355,10 @@ class MainWindow(QMainWindow):
         self._sp_listen_port.setMaximumWidth(90)
         tg.addWidget(self._sp_listen_port)
 
+        tg.addStretch(1)
+        tg = QHBoxLayout()
+        tg.setSpacing(8)
+        tcp_layout.addLayout(tg)
         tg.addWidget(QLabel("设备编号:"))
         self._edt_device_id = QLineEdit(self._config.device_id)
         self._edt_device_id.setMinimumWidth(100)
@@ -1106,16 +1403,19 @@ class MainWindow(QMainWindow):
         )
         self._btn_kick.clicked.connect(self._on_kick_client_clicked)
         tg.addWidget(self._btn_kick)
+        tg.addStretch(1)
         h.addWidget(self._tcp_group, 1)
+        h.addStretch(1)
 
-        h.addSpacing(8)
+        actions = QHBoxLayout()
+        actions.setSpacing(8)
         self._btn_connect = QPushButton()
         self._btn_connect.setIcon(style.standardIcon(QStyle.SP_DialogYesButton))
         self._btn_connect.setText("连接")
         self._btn_connect.setProperty("role", "primary")
         self._btn_connect.setAccessibleName("连接串口")
         self._btn_connect.clicked.connect(self._on_connect_clicked)
-        h.addWidget(self._btn_connect)
+        actions.addWidget(self._btn_connect)
 
         self._btn_disconnect = QPushButton()
         self._btn_disconnect.setIcon(
@@ -1125,7 +1425,7 @@ class MainWindow(QMainWindow):
         self._btn_disconnect.setProperty("role", "secondary")
         self._btn_disconnect.setAccessibleName("断开串口")
         self._btn_disconnect.clicked.connect(self._on_disconnect_clicked)
-        h.addWidget(self._btn_disconnect)
+        actions.addWidget(self._btn_disconnect)
 
         self._btn_demo = QPushButton()
         self._btn_demo.setIcon(style.standardIcon(QStyle.SP_MediaPlay))
@@ -1133,7 +1433,7 @@ class MainWindow(QMainWindow):
         self._btn_demo.setProperty("role", "secondary")
         self._btn_demo.setAccessibleName("开启演示模式")
         self._btn_demo.clicked.connect(self._on_demo_clicked)
-        h.addWidget(self._btn_demo)
+        actions.addWidget(self._btn_demo)
 
         # 演示专用：模拟"放入/移除钢板"（仅演示模式可用；模拟数据，
         # 不代表真实串口连接）。默认无钢板，可先演示真实标定顺序。
@@ -1149,9 +1449,8 @@ class MainWindow(QMainWindow):
             "再次点击移除钢板，信号回到基线附近。模拟数据。"
         )
         self._btn_plate.toggled.connect(self._on_plate_toggled)
-        h.addWidget(self._btn_plate)
 
-        h.addSpacing(12)
+        actions.addSpacing(12)
         self._btn_rec = QPushButton()
         self._btn_rec.setIcon(style.standardIcon(QStyle.SP_DialogSaveButton))
         self._btn_rec.setText("开始记录")
@@ -1159,7 +1458,7 @@ class MainWindow(QMainWindow):
         self._btn_rec.setProperty("role", "primary")
         self._btn_rec.setAccessibleName("开始或停止记录")
         self._btn_rec.toggled.connect(self._on_rec_toggled)
-        h.addWidget(self._btn_rec)
+        actions.addWidget(self._btn_rec)
 
         self._btn_choose_dir = QPushButton()
         self._btn_choose_dir.setIcon(
@@ -1168,16 +1467,21 @@ class MainWindow(QMainWindow):
         self._btn_choose_dir.setText("选目录")
         self._btn_choose_dir.setProperty("role", "ghost")
         self._btn_choose_dir.clicked.connect(self._on_choose_dir)
-        h.addWidget(self._btn_choose_dir)
+        actions.addWidget(self._btn_choose_dir)
 
         self._lbl_rec_file = ElidingLabel("未选择")
         self._lbl_rec_file.setMinimumWidth(80)
-        h.addWidget(self._lbl_rec_file, 1)
+        actions.addWidget(self._lbl_rec_file, 1)
 
         self._lbl_rec = QLabel("停止")
-        h.addWidget(self._lbl_rec)
+        actions.addWidget(self._lbl_rec)
 
-        bar.setLayout(h)
+        layout = QVBoxLayout(bar)
+        layout.setContentsMargins(12, 6, 12, 6)
+        layout.setSpacing(4)
+        h.setContentsMargins(0, 0, 0, 0)
+        layout.addLayout(h)
+        layout.addLayout(actions)
         # 显式设置 Tab 顺序：端口 → 刷新 → 波特率 → 连接 → 断开 → 演示 → 记录
         self.setTabOrder(self._cmb_port, self._btn_refresh)
         self.setTabOrder(self._btn_refresh, self._cmb_baud)
@@ -1366,24 +1670,35 @@ class MainWindow(QMainWindow):
         v.setSpacing(8)
 
         heat_card = SurfaceCard()
-        self._heatmap_header = SectionHeader(
-            "4×4 阵列热力图",
-            "相对无钢板基线的衰减量（mV）；正值：信号下降；负值：信号升高",
-        )
-        heat_card.add_widget(self._heatmap_header)
+        self._heatmap_header = SectionHeader("4×4 阵列热力图", "等待第 1 步公共补偿标定")
+        header = QHBoxLayout()
+        header.addWidget(self._heatmap_header, 1)
+        self._before_compensation = QCheckBox("查看补偿前")
+        self._before_compensation.setToolTip("使用同一完好参考和同一色阶对照补偿前后。")
+        self._before_compensation.toggled.connect(lambda: self._render_compensation_grid())
+        header.addWidget(self._before_compensation, 0, Qt.AlignVCenter)
+        heat_card.add_layout(header)
+        self._workflow_status = QLabel("连接设备后采集完好参考，或加载同工况标定。")
+        self._workflow_status.setObjectName("Caption")
+        heat_card.add_widget(self._workflow_status)
         self._heatmap = HeatmapWidget()
-        self._heatmap.channel_clicked.connect(self._select_channel)
+        self._heatmap.channel_clicked.connect(self._on_heatmap_cell_clicked)
         heat_card.add_widget(self._heatmap, 1)
 
         range_row = QHBoxLayout()
         range_row.setSpacing(8)
+        self._legacy_range_controls = QWidget()
+        range_row.setContentsMargins(0, 0, 0, 0)
+        self._legacy_range_controls.setLayout(range_row)
+        self._legacy_range_controls.hide()
         heatmap_mode_label = QLabel("显示")
         self._array_heatmap_mode = QComboBox()
         self._array_heatmap_mode.setObjectName("arrayHeatmapMode")
         self._array_heatmap_mode.setAccessibleName("热力图显示量")
-        self._array_heatmap_mode.addItem("原始衰减（mV）", "attenuation")
         self._array_heatmap_mode.addItem("覆盖率（%）", "coverage")
+        self._array_heatmap_mode.addItem("空场衰减（mV）", "board_raw")
         self._array_heatmap_mode.addItem("公共补偿（mV）", "corrected")
+        self._array_heatmap_mode.addItem("独立衰减实验（mV）", "attenuation")
         heatmap_mode_label.setBuddy(self._array_heatmap_mode)
         range_row.addWidget(heatmap_mode_label)
         range_row.addWidget(self._array_heatmap_mode)
@@ -1406,7 +1721,7 @@ class MainWindow(QMainWindow):
         self._sp_range.valueChanged.connect(self._on_manual_range_changed)
         range_row.addWidget(self._sp_range)
         range_row.addStretch(1)
-        heat_card.add_layout(range_row)
+        heat_card.add_widget(self._legacy_range_controls)
         self._lbl_array_coverage_status = QLabel()
         self._lbl_array_coverage_status.setObjectName("arrayCoverageHeatmapStatus")
         self._lbl_array_coverage_status.setWordWrap(True)
@@ -1420,7 +1735,13 @@ class MainWindow(QMainWindow):
         v.addWidget(self._legend)
         self._array_heatmap_mode.currentIndexChanged.connect(self._on_array_heatmap_mode_changed)
 
+        self._board_controls = QScrollArea()
+        self._board_controls.setWidgetResizable(True)
+        self._board_controls.setFrameShape(QFrame.NoFrame)
+        self._board_controls.hide()
+
         calib_card = SurfaceCard()
+        self._legacy_calib_card = calib_card
         calib_card.add_widget(SectionHeader(
             "无钢板基线标定",
             "移除钢板后标定；基线固定，放入钢板后观察衰减量",
@@ -1454,8 +1775,10 @@ class MainWindow(QMainWindow):
         self._lbl_calib.setObjectName("Caption")
         calib_row.addWidget(self._lbl_calib, 1)
         calib_card.add_layout(calib_row)
-        v.addWidget(calib_card)
+        calib_card.hide()
 
+        self._heatmap.set_display_mode("compensated")
+        self._legend.set_display_mode("compensated")
         left.setLayout(v)
         return left
 
@@ -1473,17 +1796,6 @@ class MainWindow(QMainWindow):
         ch_card.add_widget(self._channel_panel)
         v.addWidget(ch_card, 1)
 
-        # 回放控制条（默认隐藏，切到回放模式时显示）
-        self._replay_controls = ReplayControls()
-        self._replay_controls.setVisible(False)
-        self._replay_controls.open_csv_requested.connect(self._on_replay_open)
-        self._replay_controls.play_requested.connect(self._on_replay_play)
-        self._replay_controls.pause_requested.connect(self._on_replay_pause)
-        self._replay_controls.stop_requested.connect(self._on_replay_stop)
-        self._replay_controls.seek_requested.connect(self._on_replay_seek)
-        self._replay_controls.speed_requested.connect(self._on_replay_speed)
-        v.addWidget(self._replay_controls)
-
         # PlotWidget 自带"实时曲线"标题——不要在外层再加 SectionHeader
         # 也不要在外层套 SurfaceCard，避免双重内边距浪费高度
         self._plot = PlotWidget()
@@ -1493,6 +1805,16 @@ class MainWindow(QMainWindow):
 
         right.setLayout(v)
         return right
+
+    def _build_replay_bar(self) -> QWidget:
+        self._replay_controls = ReplayControls()
+        self._replay_controls.open_csv_requested.connect(self._on_replay_open)
+        self._replay_controls.play_requested.connect(self._on_replay_play)
+        self._replay_controls.pause_requested.connect(self._on_replay_pause)
+        self._replay_controls.stop_requested.connect(self._on_replay_stop)
+        self._replay_controls.seek_requested.connect(self._on_replay_seek)
+        self._replay_controls.speed_requested.connect(self._on_replay_speed)
+        return self._replay_controls
 
     def _build_dock(self) -> None:
         """底部 QDockWidget：日志 + 原始数据。"""
@@ -1579,14 +1901,6 @@ class MainWindow(QMainWindow):
         self.addDockWidget(Qt.BottomDockWidgetArea, dock)
         dock.visibilityChanged.connect(self._on_dock_visibility_changed)
 
-    def _build_toolbar(self) -> None:
-        """保留 QToolBar 占位（无可见内容，命令栏代替了它）。"""
-        tb = QToolBar("Main")
-        tb.setMovable(False)
-        tb.setVisible(False)
-        self._tb = tb
-        self.addToolBar(Qt.TopToolBarArea, tb)
-
     def _on_dock_visibility_changed(self, visible: bool) -> None:
         if hasattr(self, "_btn_diag"):
             self._btn_diag.blockSignals(True)
@@ -1639,7 +1953,7 @@ class MainWindow(QMainWindow):
                 and not self._config.binding_confirmed
                 else ""
             )
-            self._lbl_profile_tb.setText(
+            self._lbl_profile_tb.set_full_text(
                 f"Profile: {self._config.adc_profile.display_name}"
                 f" | 布局: {self._config.layout_display_name}"
                 f"{unconfirmed}"
@@ -2196,6 +2510,7 @@ class MainWindow(QMainWindow):
         # 钢板切换按钮仅演示模式可用
         if hasattr(self, "_btn_plate"):
             self._btn_plate.setEnabled(state == SourceState.DEMO)
+            self._btn_plate.setVisible(state == SourceState.DEMO and self._task_mode == "plate")
             if state != SourceState.DEMO:
                 self._btn_plate.blockSignals(True)
                 self._btn_plate.setChecked(False)
@@ -2205,6 +2520,7 @@ class MainWindow(QMainWindow):
         # 否则曲线全宽布局下按钮可用性与实际数据源状态脱节
         for full, inline in (
             ("_btn_connect", "_btn_connect_inline"),
+            ("_btn_disconnect", "_btn_disconnect_inline"),
             ("_btn_demo", "_btn_demo_inline"),
             ("_btn_rec", "_btn_rec_inline"),
         ):
@@ -2215,6 +2531,8 @@ class MainWindow(QMainWindow):
         # 监听/连接期间锁定设备编号；"清除设备"仅在 TCP 已连接时可用
         self._set_identity_editable()
         self._refresh_kick_enabled()
+        if state != SourceState.REPLAY:
+            self._sync_active_task_context()
 
     # ==================================================================
     # 串口事件
@@ -2569,6 +2887,10 @@ class MainWindow(QMainWindow):
             if is_forward and previous_discarded == self._scan_duplicates + self._scan_reorders:
                 self._array_last_live_scan = df.scan_number
                 self._send_array_analysis_frame(df.samples_mv, df.scan_status, df.valid_mask)
+                t_rel = max(0.0, now - (self._session_start_time or now))
+                enabled_mask = sum(1 << channel for channel in self._processor.enabled_channels)
+                raw = usable_samples(df.samples_mv, df.scan_status, df.valid_mask & enabled_mask)
+                self._dispatch_workflow_frame(t_rel, raw)
         self._last_valid_data_time = now
         # 合法 D 帧到达：解除"无字节/协议失配/数据陈旧"一切超时告警
         self._data_timeout_reported = False
@@ -2843,6 +3165,7 @@ class MainWindow(QMainWindow):
     # ==================================================================
     def _on_auto_range_toggled(self, checked: bool) -> None:
         self._heatmap_auto = bool(checked)
+        self._config.heatmap_auto = self._heatmap_auto
         self._chk_auto.setText("自动范围: 开" if checked else "自动范围: 关")
         if not checked:
             self._heatmap_range_max = max(
@@ -2858,6 +3181,8 @@ class MainWindow(QMainWindow):
         self._heatmap_range_max = max(1, int(v))
         self._heatmap_manual_max = float(self._heatmap_range_max)
         self._heatmap_manual_min = -float(self._heatmap_range_max)
+        self._config.heatmap_min = self._heatmap_manual_min
+        self._config.heatmap_max = self._heatmap_manual_max
         if not self._heatmap_auto:
             self._apply_range_to_ui()
 
@@ -2899,11 +3224,17 @@ class MainWindow(QMainWindow):
                 self._heatmap_auto_max * 0.9 + candidate * 0.1
             )
         self._heatmap_range_max = max(self._heatmap_auto_max, 1.0)
-        self._apply_range_to_ui()
+        if self._task_mode == "plate" and self._array_heatmap_mode.currentData() == "attenuation":
+            self._apply_range_to_ui()
 
     # ==================================================================
     # 选中通道
     # ==================================================================
+    def _on_heatmap_cell_clicked(self, channel: int) -> None:
+        self._select_channel(channel)
+        if self._workspace_tool is None:
+            self._set_workspace_tool("channels")
+
     def _select_channel(self, channel: int) -> None:
         if not (0 <= channel < 16):
             return
@@ -3248,21 +3579,6 @@ class MainWindow(QMainWindow):
         self._log(f"[CFG] 设置已应用: profile={new_profile.name}")
         self._update_all_displays()
 
-    def _on_about(self) -> None:
-        QMessageBox.information(
-            self,
-            "关于",
-            "涡流阵列采集系统 v3（mV 协议）\n\n"
-            "实验流程：无钢板基线标定 → 放入钢板 → 观察检波电压衰减\n"
-            "  衰减量 = 无钢板基线 − 当前检波电压（滤波），单位 mV\n"
-            "  检波电压下降比例 = 衰减量 / 基线 × 100%\n\n"
-            "适配 STM32 固件 v3 毫伏协议：\n"
-            "  D,<scan>,<status>,<mask>,<i2c>,mV,S1..S16\\r\\n"
-            "（22 字段，0.125 mV 步进）\n"
-            "  E,INIT,<status>,<inits>,<recovers>,<errs>\\r\\n\n\n"
-            "硬件链路：AD8362 检波 → 1/2 分压 → ADS1115 16-bit + ADG706",
-        )
-
     # ==================================================================
     # 回放
     # ==================================================================
@@ -3308,6 +3624,7 @@ class MainWindow(QMainWindow):
         self._clear_plot_baselines()
         self._update_all_displays()
         self._set_source_state(SourceState.REPLAY)
+        self._sync_active_task_context()
 
     def _apply_replay_recorded_map(self) -> None:
         """回放布局：文件带有效记录映射 → 默认按"记录时布局"显示；
@@ -3336,6 +3653,8 @@ class MainWindow(QMainWindow):
                 # 只换坐标会让记录时的 CH04 格子被按索引错标成 CH12
                 rec_labels = labels_for_map(rec_map)
                 self._channel_labels = dict(rec_labels)
+                self._inspection_panel.set_channel_labels(rec_labels)
+                self._compensation.set_channels(rec_map, rec_labels)
                 detected = binding_for_map(rec_map)
                 self._binding_label = binding_name(
                     detected or self._config.cell_binding
@@ -3431,7 +3750,7 @@ class MainWindow(QMainWindow):
         if self._replay is None:
             return
         self._replay.stop()
-        self._replay_controls.set_index(0)
+        self._replay_controls.set_index(None)
         # 保持 REPLAY 源状态：停止回放 ≠ 退出回放模式——
         # 回放模式下连接/演示/记录按钮的禁用逻辑仍然成立，
         # 退出回放只能经由模式切换（_set_app_mode）
@@ -3440,7 +3759,7 @@ class MainWindow(QMainWindow):
         self._replay_controls.set_state(state)
         if state == "stopped":
             self._clear_array_analysis_frame()
-        elif state in ("paused", "ended") and self._array_analysis is not None:
+        elif state in ("paused", "ended") and self._task_mode == "plate" and self._array_analysis is not None:
             self._array_analysis.hold_frame()
         if state == "playing":
             self._lbl_state.setText("回放中")
@@ -3467,6 +3786,13 @@ class MainWindow(QMainWindow):
             return
         self._replay.set_speed(speed)
 
+    def _show_replay_task_frame(self, row) -> None:
+        if self._task_mode == "plate":
+            all_valid = len(row.raw_valid) == MAX_CHANNEL_COUNT and all(valid == 1 for valid in row.raw_valid)
+            self._send_array_analysis_frame(row.wire_mv if all_valid else (), row.status, row.valid_mask)
+        raw = usable_samples(row.wire_mv, row.status, row.valid_mask, row.raw_valid)
+        self._dispatch_workflow_frame(row.t_rel, raw, row.position_mm)
+
     def _on_replay_frame(self, row) -> None:
         """从 CSV 行直接写入 processor，不走协议解析路径。
 
@@ -3476,11 +3802,8 @@ class MainWindow(QMainWindow):
         """
         if self._app_mode != "replay":
             return
-        values = row.wire_mv if (
-            len(row.raw_valid) == MAX_CHANNEL_COUNT
-            and all(valid == 1 for valid in row.raw_valid)
-        ) else ()
-        self._send_array_analysis_frame(values, row.status, row.valid_mask)
+        self._last_replay_task_row = row
+        self._show_replay_task_frame(row)
         n = self._replay.n_channels if self._replay else 16
         self._last_replay_raw_valid = [0] * 16
         for c in range(min(n, 16)):
@@ -3568,9 +3891,17 @@ class MainWindow(QMainWindow):
         )
 
         self._check_data_freshness()
-        dialog = self._sync_array_analysis_context()
+        dialog = self._sync_array_analysis_context() if self._task_mode == "plate" else None
         if dialog is not None and self._app_mode == "live" and self._data_timeout_reported:
             dialog.clear_frame()
+        inspection = self._sync_inspection_context()
+        if self._app_mode == "live" and self._data_timeout_reported and self._latest_workflow_packet is not None:
+            self._latest_workflow_packet = None
+            self._latest_compensated = None
+            self._compensation.reset_stream()
+            if inspection is not None:
+                inspection.lose_frame()
+            self._render_compensation_grid()
         if self._calib.is_running():
             self._btn_calib.setEnabled(False)
             self._btn_calib_cancel.setEnabled(True)
@@ -3734,7 +4065,8 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event) -> None:
         self._refresh_timer.stop()
         if self._array_analysis is not None:
-            self._array_analysis.close()
+            self._array_analysis.set_workspace_active(False)
+            self._array_analysis.clear_frame()
         self._calib.cancel()
         self._stop_all_sources()
         if self._recorder.is_recording:

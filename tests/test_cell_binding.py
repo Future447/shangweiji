@@ -279,7 +279,7 @@ class TestDetailReconciliation(_WinBase):
         )
         # 原始 / 滤波 / VOUT 三个量分别展示
         self.assertEqual(panel._m_filtered._lbl.text(), "滤波后 mV")
-        self.assertEqual(panel._m_vout._lbl.text(), "VOUT(分压后) mV")
+        self.assertEqual(panel._m_vout._lbl.text(), "检波器 VOUT 估算 mV")
         self.assertIn("绑定", panel._lbl_binding.text())
 
     def test_detail_marks_invalid_bit(self):

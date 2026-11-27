@@ -45,7 +45,7 @@ from .measurement import (
 
 
 SCHEMA_VERSION = 4  # v4: 新增 attenuation/drop_pct 列与基线来源列
-APP_VERSION = "3.5.2"
+APP_VERSION = "3.8.0"
 MEASUREMENT_UNIT = "mV"
 
 

@@ -22,9 +22,11 @@ def test_native_dialog_receives_live_valid_frames_and_uses_physical_map(monkeypa
         win._start_new_session(SCOPE_SERIAL)
         win._enter_live_scope(SCOPE_SERIAL, 'array-test-device')
         win._set_source_state(SourceState.SERIAL_CONNECTED)
-        win.findChild(QPushButton, 'arrayAnalysisButton').click()
+        win.findChild(QPushButton, 'inspectionMode_plate').click()
         dialog = win._array_analysis
-        assert dialog.isVisible()
+        assert not dialog.isWindow()
+        assert win._board_controls.widget() is dialog
+        assert not win._board_controls.isHidden()
         win._ingest_bytes(EXAMPLE)
         account = dialog.findChild(QPushButton, 'arrayCaptureBaseline')
         count = dialog.findChild(QSpinBox, 'arrayCaptureFrames')
@@ -51,8 +53,8 @@ def test_native_dialog_receives_live_valid_frames_and_uses_physical_map(monkeypa
         assert account.isEnabled()
         before = len(feed)
         account.click()
-        win.findChild(QPushButton, 'arrayAnalysisButton').click()
-        assert len(feed) == before  # Reopening visible dialog cannot contribute a frame.
+        win.findChild(QPushButton, 'inspectionMode_plate').click()
+        assert len(feed) == before  # Reselecting the same task cannot contribute a frame.
         win._set_source_state(SourceState.DISCONNECTED)
         QTest.qWait(170)
         assert not account.isEnabled()
@@ -83,6 +85,12 @@ def test_native_dialog_captures_and_matches_live_positions(monkeypatch, tmp_path
         dialog.baseline_button.click()
         feed(0, 3)
         assert list(dialog._analysis.baseline) == list(range(300, 316))
+        win._array_heatmap_mode.setCurrentIndex(win._array_heatmap_mode.findData("board_raw"))
+        feed(-2)
+        QTest.qWait(150)
+        cell = win._heatmap._cells[win._heatmap.channel_map()[0]]
+        assert cell.corrected_value == 2.0
+        assert "空场衰减" in cell.toolTip()
 
         dialog.position_spin.setValue(-0.5)
         dialog.template_button.click()
@@ -98,12 +106,22 @@ def test_native_dialog_captures_and_matches_live_positions(monkeypatch, tmp_path
         assert [dialog.coverage_table.item(0, col).text() for col in range(4)] == [
             '50%', '0%', '0%', '0%',
         ]
-        cell = win._heatmap.channel_map()[0]
-        assert '-6.000' in dialog.delta_table.item(*cell).text()
+        coordinate = win._heatmap.channel_map()[0]
+        assert '-6.000' in dialog.delta_table.item(*coordinate).text()
 
         saved = tmp_path / 'steel-plate.json'
         dialog.save_calibration(saved)
         dialog.load_calibration(saved)
+        assert dialog._analysis.positions == (-0.5, 1.5)
+        assert win._array_heatmap_mode.currentData() == "coverage"
+        QTest.qWait(120)
+        win.findChild(QPushButton, "inspectionMode_weld").click()
+        assert win._board_controls.isHidden()
+        assert win._task_mode == "compensation"
+        assert cell.display_mode == "compensated"
+        assert cell.corrected_value is None
+        win.findChild(QPushButton, "inspectionMode_plate").click()
+        assert not win._board_controls.isHidden()
         assert dialog._analysis.positions == (-0.5, 1.5)
     finally:
         win.close()
@@ -130,14 +148,46 @@ def test_csv_coverage_uses_recorded_context_and_rejects_bad_frame(monkeypatch, t
 
         monkeypatch.setattr(QFileDialog, 'getOpenFileName', lambda *args: (str(path), ''))
         win._set_app_mode('replay')
+        win.findChild(QPushButton, 'inspectionMode_plate').click()
+        assert win._array_analysis._context_key is None
         win._on_replay_open()
         assert win._replay.total_rows == 2
         assert win._replay.recorded_source_scope == 'demo'
-        win._on_array_analysis_clicked()
+        assert win._array_analysis._context_key[:2] == ('replay', str(path))
         values = []
         monkeypatch.setattr(win._array_analysis, 'on_frame', values.append)
         win._replay.play()
         QTest.qWait(180)
         assert values == [[309.625] * 16, None]
+        assert win._replay_controls._lbl_t.text() == '2/2'
+        assert win._replay_controls._lbl_file.toolTip() == str(path)
+    finally:
+        win.close()
+
+
+
+def test_workspace_shares_live_and_replay_source_controls(monkeypatch, tmp_path):
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "appdata"))
+    win = MainWindow()
+    try:
+        win.resize(1020, 780)
+        win.show()
+        assert not win._op_bar_inline.isHidden()
+        assert win._replay_controls.isHidden()
+        win._btn_mode_replay.click()
+        assert win._btn_mode_replay.isChecked()
+        assert not win._btn_mode_live.isChecked()
+        assert win._op_bar_inline.isHidden()
+        assert win._op_bar_full.isHidden()
+        assert not win._replay_controls.isHidden()
+        win.findChild(QPushButton, "inspectionMode_plate").click()
+        assert not win._replay_controls.isHidden()
+        assert not win._board_controls.isHidden()
+        win._btn_mode_live.click()
+        assert win._btn_mode_live.isChecked()
+        assert not win._btn_mode_replay.isChecked()
+        assert not win._op_bar_inline.isHidden()
+        assert win._replay_controls.isHidden()
+        assert not win._board_controls.isHidden()
     finally:
         win.close()

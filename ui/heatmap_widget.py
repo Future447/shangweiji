@@ -43,7 +43,14 @@ from ui.theme import DATA_VIZ, PALETTE, font_family_mono, font_family_ui
 
 logger = logging.getLogger(__name__)
 
-_DISPLAY_MODES = ("attenuation", "coverage", "corrected")
+_RESPONSE_LABELS = {
+    "board_raw": "空场衰减",
+    "before_compensation": "补偿前响应",
+    "corrected": "补偿后响应",
+    "compensated": "补偿后响应",
+    "residual": "补偿后良品残差",
+}
+_DISPLAY_MODES = ("attenuation", "coverage", *_RESPONSE_LABELS)
 
 
 # ---------------------------------------------------------------------------
@@ -159,7 +166,7 @@ class HeatmapCell(QWidget):
         self.corrected_value: Optional[float] = None
         self.display_mode = "attenuation"
 
-        self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.setMinimumSize(70, 56)
         self.setFocusPolicy(Qt.StrongFocus)
         self.setAutoFillBackground(False)
@@ -221,7 +228,7 @@ class HeatmapCell(QWidget):
             return
         self.display_mode = mode
         self.coverage_mode = mode == "coverage"
-        self.corrected_mode = mode == "corrected"
+        self.corrected_mode = mode in _RESPONSE_LABELS
         self.coverage_value = None
         self.corrected_value = None
         self._refresh_presentation()
@@ -261,9 +268,10 @@ class HeatmapCell(QWidget):
                 else f"{self.coverage_value * 100:.1f}%"
             )
         elif self.corrected_mode:
+            decimals = 1 if self.display_mode in ("corrected", "board_raw") else 3
             self.value_text = (
                 "未知" if self.corrected_value is None
-                else f"{self.corrected_value:+.1f}"
+                else f"{self.corrected_value:+.{decimals}f}"
             )
         elif not self.enabled:
             self.value_text = "未启用"
@@ -289,13 +297,16 @@ class HeatmapCell(QWidget):
                 "未知" if self.corrected_value is None
                 else f"{self.corrected_value:+.3f} mV"
             )
+            name = _RESPONSE_LABELS[self.display_mode]
             lines = [
                 f"{self.title} ({self.position_label})",
-                f"补偿后响应: {value}",
+                f"{name}: {value}",
                 "负值蓝色；零点中性；正值红色",
             ]
             if self.valid_in_frame and self.sample_mv is not None:
                 lines.append(f"ADC 原始: {self.sample_mv:.3f} mV")
+            if self.status in (ChannelStatus.INVALID, ChannelStatus.SATURATED):
+                lines.append(_STATUS_TEXT[self.status])
             self.setToolTip("\n".join(lines))
             return
         if not self.enabled and not self.coverage_mode:
@@ -360,7 +371,8 @@ class HeatmapCell(QWidget):
                 "未知" if self.corrected_value is None
                 else f"{self.corrected_value:+.1f} mV"
             )
-            desc = f"位置 {self.position_label}，补偿后响应 {value}"
+            name = _RESPONSE_LABELS[self.display_mode]
+            desc = f"位置 {self.position_label}，{name} {value}"
         elif not self.enabled:
             desc = "未启用"
         else:
@@ -449,11 +461,11 @@ class HeatmapCell(QWidget):
             Qt.AlignLeft | Qt.AlignTop,
             self.title,
         )
-        p.drawText(
-            rect.adjusted(0, 4, -6, 0),
-            Qt.AlignRight | Qt.AlignTop,
-            self.position_label,
-        )
+        metrics = p.fontMetrics()
+        if metrics.horizontalAdvance(self.title) + metrics.horizontalAdvance(self.position_label) + 14 <= rect.width():
+            p.drawText(
+                rect.adjusted(0, 4, -6, 0), Qt.AlignRight | Qt.AlignTop, self.position_label,
+            )
 
         value_font = QFont()
         value_font.setFamily(font_family_mono().split(",")[0].strip())
@@ -541,9 +553,10 @@ class HeatmapLegend(QWidget):
         if mode == "coverage":
             name = "格子覆盖率图例"
             description = "覆盖率 0% 至 100%，浅蓝至深蓝，灰色表示未知"
-        elif mode == "corrected":
-            name = "补偿后响应图例"
-            description = "补偿后响应，单位 mV；负值蓝色，零点中性，正值红色；灰色表示未知"
+        elif mode in _RESPONSE_LABELS:
+            quantity = _RESPONSE_LABELS[mode]
+            name = f"{quantity}图例"
+            description = f"{quantity}，单位 mV；负值蓝色，零点中性，正值红色；灰色表示未知"
         else:
             name = "衰减量图例"
             description = "衰减量，单位毫伏，负值蓝色，零点中性，正值红色"
@@ -583,9 +596,11 @@ class HeatmapLegend(QWidget):
         label_y = grad_rect.bottom() + 14
         left_text = "0%" if self._coverage_mode else f"−{self._range_max:.0f}"
         middle_text = "50% 覆盖率" if self._coverage_mode else "0 mV"
-        if self._display_mode == "corrected":
-            middle_text = "0 mV · 补偿后"
+        if self._display_mode in _RESPONSE_LABELS:
+            middle_text = f"0 mV · {_RESPONSE_LABELS[self._display_mode]}"
         right_text = "100%" if self._coverage_mode else f"+{self._range_max:.0f}"
+        if self._display_mode in _RESPONSE_LABELS:
+            left_text, right_text = f"−{self._range_max:.1f}", f"+{self._range_max:.1f}"
         fm = p.fontMetrics()
         p.drawText(rect.left(), label_y, left_text)
         p.drawText(
@@ -629,6 +644,7 @@ class HeatmapWidget(QWidget):
         layout = QGridLayout()
         layout.setSpacing(4)
         layout.setContentsMargins(0, 0, 0, 0)
+        layout.setAlignment(Qt.AlignCenter)
         self.setLayout(layout)
         self._layout = layout
 
@@ -690,6 +706,7 @@ class HeatmapWidget(QWidget):
             self._cells[(r, c)] = cell
             self._cell_to_channel[ch] = (r, c)
             layout.addWidget(cell, r, c)
+        self._reflow_cells()
         if prev_selected is not None and prev_selected in self._cell_to_channel:
             self.select_channel(prev_selected)
 
@@ -852,7 +869,7 @@ class HeatmapWidget(QWidget):
         self._reflow_cells()
 
     def _reflow_cells(self) -> None:
-        """根据可用空间重新计算每个 cell 的尺寸，保持宽高比 ≤ 1.3。"""
+        """按视口空间限制格子的最大尺寸，保留布局收缩能力。"""
         if not self._cells:
             return
         layout = self._layout
@@ -867,8 +884,7 @@ class HeatmapWidget(QWidget):
             return
         cell_w = avail_w // self._cols
         cell_h = avail_h // self._rows
-        side = min(cell_w, cell_h)
-        if side < 56:
-            side = 56
+        cell_w = min(cell_w, int(cell_h * 1.35))
+        cell_h = min(cell_h, cell_w)
         for cell in self._cells.values():
-            cell.setFixedSize(side, side)
+            cell.setMaximumSize(max(70, cell_w), max(56, cell_h))

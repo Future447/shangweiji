@@ -413,45 +413,16 @@ class SettingsDialog(QDialog):
         self._sp_med = QSpinBox()
         self._sp_med.setRange(1, 9)
         self._sp_med.setValue(median_window)
-        self._chk_invert = QCheckBox(
-            "旧诊断 Δ 符号反转（仅旧诊断量；不影响衰减量/下降比例）"
-        )
-        self._chk_invert.setToolTip(
-            "仅翻转旧语义 Δ = 滤波 − 基线 及其旧百分比（诊断/兼容用途）。\n"
-            "衰减量 = 无钢板基线 − 滤波 与检波电压下降比例不受影响，\n"
-            "始终按真实方向显示（正=信号下降，负=信号升高）。"
-        )
-        self._chk_invert.setChecked(invert_sign)
         filt_form.addRow("EMA α:", self._sp_ema)
         filt_form.addRow("中值窗口:", self._sp_med)
-        filt_form.addRow("", self._chk_invert)
         gb.setLayout(filt_form)
         v.addWidget(gb)
 
-        # 热力图
-        gb_hm = QFrame()
-        gb_hm.setObjectName("SurfaceCard")
-        hm_form = QFormLayout()
-        hm_form.setSpacing(8)
-        self._chk_hm_auto = QCheckBox("自动范围（防尖峰）")
-        self._chk_hm_auto.setChecked(heatmap_auto)
-        self._sp_hm_min = QDoubleSpinBox()
-        self._sp_hm_min.setRange(-1e9, 0.0)
-        self._sp_hm_min.setDecimals(1)
-        self._sp_hm_min.setValue(heatmap_min)
-        self._sp_hm_max = QDoubleSpinBox()
-        self._sp_hm_max.setRange(0.0, 1e9)
-        self._sp_hm_max.setDecimals(1)
-        self._sp_hm_max.setValue(heatmap_max)
-        self._chk_hm_auto.setToolTip(
-            "自动按当前数据调整色阶（便于观察相对变化）；"
-            "取消勾选后用固定色阶，便于标定前后/不同实验之间对比"
-        )
-        hm_form.addRow(self._chk_hm_auto)
-        hm_form.addRow("色阶下界 (衰减量 mV):", self._sp_hm_min)
-        hm_form.addRow("色阶上界 (衰减量 mV):", self._sp_hm_max)
-        gb_hm.setLayout(hm_form)
-        v.addWidget(gb_hm)
+        # 旧 CSV 的字段继续使用原值；旧实验色阶只在热力图下方调整。
+        self._legacy_settings = {
+            "heatmap_min": heatmap_min, "heatmap_max": heatmap_max,
+            "heatmap_auto": heatmap_auto, "invert_sign": invert_sign,
+        }
 
         # 曲线
         gb_plot = QFrame()
@@ -646,11 +617,8 @@ class SettingsDialog(QDialog):
             "enabled_channels": enabled,
             "ema_alpha": self._sp_ema.value(),
             "median_window": self._sp_med.value(),
-            "heatmap_min": self._sp_hm_min.value(),
-            "heatmap_max": self._sp_hm_max.value(),
-            "heatmap_auto": self._chk_hm_auto.isChecked(),
+            **self._legacy_settings,
             "curve_window_s": self._sp_window.value(),
-            "invert_sign": self._chk_invert.isChecked(),
             "restore_hw_layout": self._restore_hw_layout,
             # 最终布局标识（预设或自定义）；主窗口据此同步 channel_map
             "layout_id": self._layout_id,

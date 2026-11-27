@@ -49,7 +49,7 @@ exe = EXE(
     a.zipfiles,
     a.datas,
     [],
-    name='涡流阵列采集系统_v3.5.2',
+    name='涡流阵列采集系统_v3.8.0',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

@@ -5,6 +5,7 @@ import time
 
 import numpy as np
 import pytest
+from PyQt5.QtCore import Qt
 from PyQt5.QtTest import QTest
 from PyQt5.QtWidgets import QComboBox, QFileDialog
 
@@ -206,12 +207,13 @@ def test_coverage_toggle_preserves_cells_labels_and_signed_attenuation(window, s
     assert_coverage(window, 0.5)
 
 
-def test_closing_dialog_keeps_loaded_main_heatmap_model_active(window, saved_profile, monkeypatch):
+def test_escape_keeps_embedded_calibration_and_main_heatmap_active(window, saved_profile, monkeypatch):
     dialog = load_staged(window, saved_profile, monkeypatch)
     connect_source(window)
     feed(window, 0.5)
-    dialog.close()
-    assert not dialog.isVisible()
+    QTest.keyClick(dialog, Qt.Key_Escape)
+    assert not dialog.isWindow()
+    assert dialog.isVisible()
     feed(window, 1.5, scan=2)
     assert dialog.coverage_snapshot()["fresh"]
     assert_coverage(window, 1.5)

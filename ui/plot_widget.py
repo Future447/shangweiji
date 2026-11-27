@@ -118,11 +118,11 @@ class PlotWidget(QWidget):
         # 标题行（PlotWidget 自带的"实时曲线"标题，作为唯一标题）
         title_row = QHBoxLayout()
         title_row.setSpacing(6)
-        self._lbl_title = QLabel("实时曲线")
+        self._lbl_title = QLabel("通道电压曲线")
         title_font = QFont(_ui_family(), 11)
         title_font.setBold(True)
         self._lbl_title.setFont(title_font)
-        self._lbl_title.setAccessibleName("实时曲线标题")
+        self._lbl_title.setAccessibleName("通道电压曲线")
         title_row.addWidget(self._lbl_title)
         title_row.addSpacing(4)
         self._lbl_info = QLabel("未选中通道")
@@ -352,6 +352,18 @@ class PlotWidget(QWidget):
         )
         self._apply_visibility()
 
+    def set_legacy_experiment(self, enabled: bool) -> None:
+        self._legacy_experiment = bool(enabled)
+        self._btn_atten_view.setVisible(enabled)
+        if not enabled:
+            self._btn_atten_view.setChecked(False)
+            self._remove_attenuation_curves()
+        else:
+            for channel in self._visible_channels():
+                if self._atten_t.get(channel):
+                    self._draw_attenuation_curve(channel)
+        self._apply_visibility()
+
     def _apply_visibility(self) -> None:
         atten = self._view_mode == "attenuation"
         for c, curve in self._curves_raw.items():
@@ -361,7 +373,7 @@ class PlotWidget(QWidget):
         for c, curve in self._curves_atten.items():
             curve.setVisible(atten)
         for c, line in self._baseline_lines.items():
-            line.setVisible(not atten)
+            line.setVisible(not atten and getattr(self, "_legacy_experiment", True))
         if self._zero_line is not None:
             self._zero_line.setVisible(atten)
 
@@ -465,11 +477,14 @@ class PlotWidget(QWidget):
 
     def _clear_attenuation_items(self) -> None:
         """移除衰减曲线与数据（保留基线参考线的当前值）。"""
-        for c, curve in list(self._curves_atten.items()):
-            self._plot.removeItem(curve)
-        self._curves_atten.clear()
+        self._remove_attenuation_curves()
         self._atten_t.clear()
         self._atten_series.clear()
+
+    def _remove_attenuation_curves(self) -> None:
+        for curve in self._curves_atten.values():
+            self._plot.removeItem(curve)
+        self._curves_atten.clear()
 
     def notify_baseline_changed(self) -> None:
         """基线（重新标定/切换来源）已变更：清空派生衰减曲线。
@@ -698,20 +713,21 @@ class PlotWidget(QWidget):
             self._atten_t[channel] = self._atten_t[channel][excess:]
             self._atten_series[channel] = self._atten_series[channel][excess:]
 
-        # 衰减曲线按需创建（与可见通道集合一致）
-        if channel in self._visible_channels() and \
-                channel not in self._curves_atten:
+        if getattr(self, "_legacy_experiment", True) and channel in self._visible_channels():
+            self._draw_attenuation_curve(channel)
+            self._apply_visibility()
+
+    def _draw_attenuation_curve(self, channel: int) -> None:
+        if channel not in self._curves_atten:
             color = self._channel_color(channel)
             self._curves_atten[channel] = self._plot.plot(
                 pen=pg.mkPen(color, width=2, style=Qt.SolidLine),
                 name=f"{self._label(channel)} 衰减",
             )
-        if channel in self._curves_atten:
-            self._curves_atten[channel].setData(
-                self._atten_t[channel], self._atten_series[channel],
-                connect="finite",
-            )
-        self._apply_visibility()
+        self._curves_atten[channel].setData(
+            self._atten_t[channel], self._atten_series[channel],
+            connect="finite",
+        )
 
     # ------------------------------------------------------------------
     def sizeHint(self) -> QSize:  # noqa: N802
